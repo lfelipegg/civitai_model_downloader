@@ -346,6 +346,16 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
     # Generate HTML report
     from src.html_generator import generate_html_report
     generate_html_report(model_info, target_dir)
+    
+    # Add to download history
+    try:
+        from src.history_manager import HistoryManager
+        history_manager = HistoryManager()
+        history_manager.add_download_entry(model_info, target_dir)
+        print(f"Added {model_name} v{model_version_name} to download history")
+    except Exception as e:
+        print(f"Warning: Failed to add to download history: {e}")
+    
     return None # Indicate success
 
 def sanitize_filename(name):

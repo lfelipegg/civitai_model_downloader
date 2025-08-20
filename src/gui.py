@@ -11,13 +11,14 @@ import urllib.parse # Added for URL validation
 
 # Assuming civitai_downloader functions are available
 from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded
+from src.history_manager import HistoryManager
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         self.title("Civitai Model Downloader")
-        self.geometry("800x800")
+        self.geometry("900x900")
 
         self._download_queue_list = [] # Replaced queue.Queue with a list
         self._queue_lock = threading.Lock() # Lock for thread-safe access to the queue list
@@ -26,15 +27,37 @@ class App(ctk.CTk):
         self.queue_row_counter = 0 # To manage grid placement in the queue_frame
         self.stop_event = threading.Event() # Event to signal threads to stop
 
+        # Initialize history manager
+        self.history_manager = HistoryManager()
+
         self.protocol("WM_DELETE_WINDOW", self._on_closing) # Handle window close event
 
+        # Create main notebook for tabs
+        self.notebook = ctk.CTkTabview(self)
+        self.notebook.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
+        
         # Configure grid layout
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(4, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        
+        # Create tabs
+        self.download_tab = self.notebook.add("Downloads")
+        self.history_tab = self.notebook.add("History")
+        
+        # Setup download tab
+        self._setup_download_tab()
+        
+        # Setup history tab
+        self._setup_history_tab()
+
+    def _setup_download_tab(self):
+        # Configure grid layout for download tab
+        self.download_tab.grid_columnconfigure(1, weight=1)
+        self.download_tab.grid_rowconfigure(4, weight=1)
 
         # Input Frame
-        self.input_frame = ctk.CTkFrame(self)
-        self.input_frame.grid(row=0, column=0, columnspan=2, padx=20, pady=20, sticky="ew")
+        self.input_frame = ctk.CTkFrame(self.download_tab)
+        self.input_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
         self.input_frame.grid_columnconfigure(1, weight=1)
 
         # URL Input
@@ -66,41 +89,90 @@ class App(ctk.CTk):
         self.download_path_entry.insert(0, os.getenv("DOWNLOAD_PATH", os.getcwd()))
 
         # Download Button
-        self.download_button = ctk.CTkButton(self, text="Start Download", command=self.start_download_thread)
-        self.download_button.grid(row=1, column=0, padx=(20, 10), pady=10, sticky="ew")
+        self.download_button = ctk.CTkButton(self.download_tab, text="Start Download", command=self.start_download_thread)
+        self.download_button.grid(row=1, column=0, padx=(10, 5), pady=10, sticky="ew")
 
         # Open Download Folder Button
-        self.open_folder_button = ctk.CTkButton(self, text="Open Downloads Folder", command=self.open_download_folder)
-        self.open_folder_button.grid(row=1, column=1, padx=(10, 20), pady=10, sticky="ew")
+        self.open_folder_button = ctk.CTkButton(self.download_tab, text="Open Downloads Folder", command=self.open_download_folder)
+        self.open_folder_button.grid(row=1, column=1, padx=(5, 10), pady=10, sticky="ew")
 
         # Clear/Reset Button
-        self.clear_button = ctk.CTkButton(self, text="Clear/Reset GUI", command=self.clear_gui)
-        self.clear_button.grid(row=8, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
+        self.clear_button = ctk.CTkButton(self.download_tab, text="Clear/Reset GUI", command=self.clear_gui)
+        self.clear_button.grid(row=8, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
 
         # Download Stats Labels
-        self.progress_label = ctk.CTkLabel(self, text="Progress: N/A")
-        self.progress_label.grid(row=2, column=0, columnspan=2, padx=20, pady=(10, 0), sticky="w")
-        self.speed_label = ctk.CTkLabel(self, text="Speed: N/A")
-        self.speed_label.grid(row=3, column=0, columnspan=2, padx=20, pady=(0, 0), sticky="w")
-        self.remaining_label = ctk.CTkLabel(self, text="Remaining: N/A")
-        self.remaining_label.grid(row=4, column=0, columnspan=2, padx=20, pady=(0, 10), sticky="w")
+        self.progress_label = ctk.CTkLabel(self.download_tab, text="Progress: N/A")
+        self.progress_label.grid(row=2, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
+        self.speed_label = ctk.CTkLabel(self.download_tab, text="Speed: N/A")
+        self.speed_label.grid(row=3, column=0, columnspan=2, padx=10, pady=(0, 0), sticky="w")
+        self.remaining_label = ctk.CTkLabel(self.download_tab, text="Remaining: N/A")
+        self.remaining_label.grid(row=4, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="w")
 
 
         # Download Queue Display
-        self.queue_frame = ctk.CTkScrollableFrame(self, label_text="Download Queue")
-        self.queue_frame.grid(row=5, column=0, columnspan=2, padx=20, pady=10, sticky="nsew")
+        self.queue_frame = ctk.CTkScrollableFrame(self.download_tab, label_text="Download Queue")
+        self.queue_frame.grid(row=5, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
         self.queue_frame.grid_columnconfigure(0, weight=1)
 
         # Log Area
-        self.log_label = ctk.CTkLabel(self, text="Logs:")
-        self.log_label.grid(row=6, column=0, padx=20, pady=(10, 0), sticky="w")
-        self.log_text = ctk.CTkTextbox(self, width=600, height=200)
-        self.log_text.grid(row=7, column=0, columnspan=2, padx=20, pady=10, sticky="nsew")
+        self.log_label = ctk.CTkLabel(self.download_tab, text="Logs:")
+        self.log_label.grid(row=6, column=0, padx=10, pady=(10, 0), sticky="w")
+        self.log_text = ctk.CTkTextbox(self.download_tab, width=600, height=200)
+        self.log_text.grid(row=7, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
         self.log_text.configure(state="disabled") # Make it read-only
 
         # Configure grid layout to expand queue and log area
-        self.grid_rowconfigure(5, weight=2) # Queue frame
-        self.grid_rowconfigure(7, weight=1) # Log area
+        self.download_tab.grid_rowconfigure(5, weight=2) # Queue frame
+        self.download_tab.grid_rowconfigure(7, weight=1) # Log area
+
+    def _setup_history_tab(self):
+        """Setup the download history tab."""
+        # Configure grid layout for history tab
+        self.history_tab.grid_columnconfigure(0, weight=1)
+        self.history_tab.grid_rowconfigure(2, weight=1)
+        
+        # Search frame
+        self.search_frame = ctk.CTkFrame(self.history_tab)
+        self.search_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        self.search_frame.grid_columnconfigure(1, weight=1)
+        
+        self.search_label = ctk.CTkLabel(self.search_frame, text="Search:")
+        self.search_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
+        
+        self.search_entry = ctk.CTkEntry(self.search_frame, placeholder_text="Search by name, type, or trigger words...")
+        self.search_entry.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+        self.search_entry.bind("<KeyRelease>", self._on_search_changed)
+        
+        self.search_button = ctk.CTkButton(self.search_frame, text="Search", command=self.search_history)
+        self.search_button.grid(row=0, column=2, padx=10, pady=10)
+        
+        self.refresh_button = ctk.CTkButton(self.search_frame, text="Refresh", command=self.refresh_history)
+        self.refresh_button.grid(row=0, column=3, padx=5, pady=10)
+        
+        # Control buttons frame
+        self.history_controls_frame = ctk.CTkFrame(self.history_tab)
+        self.history_controls_frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+        
+        self.scan_button = ctk.CTkButton(self.history_controls_frame, text="Scan Downloads", command=self.scan_downloads)
+        self.scan_button.grid(row=0, column=0, padx=5, pady=5)
+        
+        self.export_button = ctk.CTkButton(self.history_controls_frame, text="Export History", command=self.export_history)
+        self.export_button.grid(row=0, column=1, padx=5, pady=5)
+        
+        self.import_button = ctk.CTkButton(self.history_controls_frame, text="Import History", command=self.import_history)
+        self.import_button.grid(row=0, column=2, padx=5, pady=5)
+        
+        # Statistics label
+        self.stats_label = ctk.CTkLabel(self.history_controls_frame, text="")
+        self.stats_label.grid(row=0, column=3, padx=20, pady=5, sticky="e")
+        
+        # History display
+        self.history_frame = ctk.CTkScrollableFrame(self.history_tab, label_text="Download History")
+        self.history_frame.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
+        self.history_frame.grid_columnconfigure(0, weight=1)
+        
+        # Load initial history
+        self.refresh_history()
 
     def browse_txt_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
@@ -542,6 +614,310 @@ class App(ctk.CTk):
         self.log_message("URL input cleared.")
         # Do not reset other fields or download queue display
         # As per the new requirement, "Clear GUI" only clears the current URLs.
+    
+    # History management methods
+    def refresh_history(self):
+        """Refresh the history display."""
+        # Clear existing history items
+        for widget in self.history_frame.winfo_children():
+            widget.destroy()
+        
+        # Get all downloads
+        downloads = self.history_manager.get_all_downloads()
+        
+        # Update statistics
+        stats = self.history_manager.get_stats()
+        total_size_mb = stats['total_size'] / (1024 * 1024)
+        self.stats_label.configure(
+            text=f"Total: {stats['total_downloads']} models, {total_size_mb:.1f} MB"
+        )
+        
+        # Display downloads
+        for i, download in enumerate(downloads):
+            self._create_history_item(download, i)
+    
+    def _create_history_item(self, download, row):
+        """Create a GUI item for a download history entry."""
+        # Main frame for the history item
+        item_frame = ctk.CTkFrame(self.history_frame)
+        item_frame.grid(row=row, column=0, padx=5, pady=5, sticky="ew")
+        item_frame.grid_columnconfigure(1, weight=1)
+        
+        # Model info frame
+        info_frame = ctk.CTkFrame(item_frame)
+        info_frame.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+        info_frame.grid_columnconfigure(1, weight=1)
+        
+        # Model name and version
+        model_name = download.get('model_name', 'Unknown')
+        version_name = download.get('version_name', 'Unknown')
+        title_text = f"{model_name} - {version_name}"
+        if len(title_text) > 60:
+            title_text = title_text[:57] + "..."
+        
+        title_label = ctk.CTkLabel(info_frame, text=title_text, font=ctk.CTkFont(weight="bold"))
+        title_label.grid(row=0, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+        
+        # Model details
+        model_type = download.get('model_type', 'Unknown')
+        base_model = download.get('base_model', 'Unknown')
+        file_size_mb = download.get('file_size', 0) / (1024 * 1024)
+        download_date = download.get('download_date', 'Unknown')
+        
+        # Format date
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(download_date.replace('Z', '+00:00'))
+            formatted_date = dt.strftime('%Y-%m-%d %H:%M')
+        except:
+            formatted_date = download_date[:19] if len(download_date) > 19 else download_date
+        
+        details_text = f"Type: {model_type} | Base: {base_model} | Size: {file_size_mb:.1f} MB | Downloaded: {formatted_date}"
+        details_label = ctk.CTkLabel(info_frame, text=details_text, font=ctk.CTkFont(size=10))
+        details_label.grid(row=1, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+        
+        # Trigger words
+        trigger_words = download.get('trigger_words', [])
+        if trigger_words:
+            trigger_text = "Triggers: " + ", ".join(trigger_words[:5])  # Show first 5 triggers
+            if len(trigger_words) > 5:
+                trigger_text += f" (+{len(trigger_words) - 5} more)"
+            trigger_label = ctk.CTkLabel(info_frame, text=trigger_text, font=ctk.CTkFont(size=9), text_color="gray")
+            trigger_label.grid(row=2, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+        
+        # Buttons frame
+        buttons_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
+        buttons_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+        
+        # Open folder button
+        open_btn = ctk.CTkButton(
+            buttons_frame,
+            text="Open Folder",
+            command=lambda d=download: self.open_model_folder(d),
+            width=80,
+            height=25
+        )
+        open_btn.grid(row=0, column=0, padx=2)
+        
+        # View report button
+        report_btn = ctk.CTkButton(
+            buttons_frame,
+            text="View Report",
+            command=lambda d=download: self.view_model_report(d),
+            width=80,
+            height=25
+        )
+        report_btn.grid(row=0, column=1, padx=2)
+        
+        # Delete button
+        delete_btn = ctk.CTkButton(
+            buttons_frame,
+            text="Delete",
+            command=lambda d=download: self.delete_model_entry(d),
+            width=60,
+            height=25,
+            fg_color="red",
+            hover_color="darkred"
+        )
+        delete_btn.grid(row=0, column=2, padx=2)
+    
+    def search_history(self):
+        """Search through download history."""
+        query = self.search_entry.get().strip()
+        
+        # Clear existing history items
+        for widget in self.history_frame.winfo_children():
+            widget.destroy()
+        
+        if query:
+            # Search for matches
+            downloads = self.history_manager.search_downloads(query)
+            self.stats_label.configure(text=f"Found {len(downloads)} matches")
+        else:
+            # Show all downloads
+            downloads = self.history_manager.get_all_downloads()
+            stats = self.history_manager.get_stats()
+            total_size_mb = stats['total_size'] / (1024 * 1024)
+            self.stats_label.configure(
+                text=f"Total: {stats['total_downloads']} models, {total_size_mb:.1f} MB"
+            )
+        
+        # Display results
+        for i, download in enumerate(downloads):
+            self._create_history_item(download, i)
+    
+    def _on_search_changed(self, event=None):
+        """Handle search entry changes with debouncing."""
+        # Cancel any pending search
+        if hasattr(self, '_search_after_id'):
+            self.after_cancel(self._search_after_id)
+        
+        # Schedule a new search after 500ms of inactivity
+        self._search_after_id = self.after(500, self.search_history)
+    
+    def scan_downloads(self):
+        """Scan the download directory to populate history."""
+        download_path = self.download_path_entry.get()
+        if not download_path:
+            messagebox.showerror("Error", "Please set a download path first.")
+            return
+        
+        if not os.path.exists(download_path):
+            messagebox.showerror("Error", f"Download path does not exist: {download_path}")
+            return
+        
+        # Show progress dialog
+        progress_dialog = ctk.CTkToplevel(self)
+        progress_dialog.title("Scanning Downloads")
+        progress_dialog.geometry("300x100")
+        progress_dialog.transient(self)
+        progress_dialog.grab_set()
+        
+        progress_label = ctk.CTkLabel(progress_dialog, text="Scanning download directory...")
+        progress_label.pack(pady=20)
+        
+        def scan_in_thread():
+            try:
+                self.history_manager.scan_and_populate_history(download_path)
+                self.after(0, lambda: [progress_dialog.destroy(), self.refresh_history(),
+                                     messagebox.showinfo("Scan Complete", "Download directory scan completed.")])
+            except Exception as e:
+                self.after(0, lambda: [progress_dialog.destroy(),
+                                     messagebox.showerror("Scan Error", f"Error during scan: {e}")])
+        
+        scan_thread = threading.Thread(target=scan_in_thread, daemon=True)
+        scan_thread.start()
+    
+    def export_history(self):
+        """Export download history to a file."""
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Export History"
+        )
+        
+        if filename:
+            if self.history_manager.export_history(filename):
+                messagebox.showinfo("Export Success", f"History exported to {filename}")
+            else:
+                messagebox.showerror("Export Error", "Failed to export history")
+    
+    def import_history(self):
+        """Import download history from a file."""
+        filename = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Import History"
+        )
+        
+        if filename:
+            merge = messagebox.askyesno(
+                "Import Options",
+                "Do you want to merge with existing history?\n\nYes = Merge (add new entries)\nNo = Replace (overwrite existing history)"
+            )
+            
+            if self.history_manager.import_history(filename, merge=merge):
+                self.refresh_history()
+                messagebox.showinfo("Import Success", "History imported successfully")
+            else:
+                messagebox.showerror("Import Error", "Failed to import history")
+    
+    def open_model_folder(self, download):
+        """Open the model's download folder."""
+        download_path = download.get('download_path')
+        if not download_path or not os.path.exists(download_path):
+            messagebox.showerror("Error", "Model folder not found")
+            return
+        
+        try:
+            if platform.system() == "Windows":
+                os.startfile(download_path)
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.Popen(["open", download_path])
+            else:  # Linux and other Unix-like
+                subprocess.Popen(["xdg-open", download_path])
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open folder: {e}")
+    
+    def view_model_report(self, download):
+        """Open the model's HTML report."""
+        html_report_path = download.get('html_report_path')
+        if not html_report_path or not os.path.exists(html_report_path):
+            messagebox.showerror("Error", "HTML report not found")
+            return
+        
+        try:
+            import webbrowser
+            webbrowser.open(f"file://{os.path.abspath(html_report_path)}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not open report: {e}")
+    
+    def delete_model_entry(self, download):
+        """Delete a model entry with confirmation."""
+        model_name = download.get('model_name', 'Unknown')
+        version_name = download.get('version_name', 'Unknown')
+        
+        # Create custom dialog
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Delete Model")
+        dialog.geometry("400x200")
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+        y = (dialog.winfo_screenheight() // 2) - (200 // 2)
+        dialog.geometry(f"400x200+{x}+{y}")
+        
+        # Dialog content
+        msg_label = ctk.CTkLabel(
+            dialog,
+            text=f"Delete '{model_name} - {version_name}'?",
+            font=ctk.CTkFont(weight="bold")
+        )
+        msg_label.pack(pady=10)
+        
+        info_label = ctk.CTkLabel(dialog, text="Choose what to delete:")
+        info_label.pack(pady=5)
+        
+        delete_files_var = ctk.BooleanVar(value=False)
+        delete_files_cb = ctk.CTkCheckBox(
+            dialog,
+            text="Delete files from disk (WARNING: This cannot be undone!)",
+            variable=delete_files_var
+        )
+        delete_files_cb.pack(pady=10)
+        
+        # Buttons frame
+        buttons_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons_frame.pack(pady=20)
+        
+        def confirm_delete():
+            dialog.destroy()
+            delete_files = delete_files_var.get()
+            
+            if self.history_manager.delete_download_entry(download['id'], delete_files=delete_files):
+                self.refresh_history()
+                action_text = "and files " if delete_files else ""
+                messagebox.showinfo("Deleted", f"Model entry {action_text}deleted successfully")
+            else:
+                messagebox.showerror("Error", "Failed to delete model entry")
+        
+        def cancel_delete():
+            dialog.destroy()
+        
+        cancel_btn = ctk.CTkButton(buttons_frame, text="Cancel", command=cancel_delete)
+        cancel_btn.pack(side="left", padx=5)
+        
+        delete_btn = ctk.CTkButton(
+            buttons_frame,
+            text="Delete",
+            command=confirm_delete,
+            fg_color="red",
+            hover_color="darkred"
+        )
+        delete_btn.pack(side="right", padx=5)
+
 if __name__ == "__main__":
     app = App()
     app.mainloop()
