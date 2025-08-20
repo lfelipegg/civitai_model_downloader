@@ -7,10 +7,10 @@ import threading
 import platform
 import subprocess
 import time
+import urllib.parse # Added for URL validation
 
 # Assuming civitai_downloader functions are available
 from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded
-import queue
 
 class App(ctk.CTk):
     def __init__(self):
@@ -19,9 +19,14 @@ class App(ctk.CTk):
         self.title("Civitai Model Downloader")
         self.geometry("800x800")
 
-        self.download_queue = queue.Queue()
+        self._download_queue_list = [] # Replaced queue.Queue with a list
+        self._queue_lock = threading.Lock() # Lock for thread-safe access to the queue list
+        self._queue_condition = threading.Condition(self._queue_lock) # Condition for signaling queue changes
         self.download_tasks = {} # To hold references to download frames and progress bars
         self.queue_row_counter = 0 # To manage grid placement in the queue_frame
+        self.stop_event = threading.Event() # Event to signal threads to stop
+
+        self.protocol("WM_DELETE_WINDOW", self._on_closing) # Handle window close event
 
         # Configure grid layout
         self.grid_columnconfigure(1, weight=1)
@@ -139,8 +144,8 @@ class App(ctk.CTk):
 
         # Start download in a separate thread to keep GUI responsive
         # Create a new thread for adding URLs to the queue and then waiting for them to complete
-        processing_and_completion_thread = threading.Thread(target=self._initiate_download_process, args=(url_input_content, api_key, download_path), daemon=True)
-        processing_and_completion_thread.start()
+        self.processing_and_completion_thread = threading.Thread(target=self._initiate_download_process, args=(url_input_content, api_key, download_path), daemon=True)
+        self.processing_and_completion_thread.start()
 
     def _initiate_download_process(self, url_input_content, api_key, download_path):
         # Add URLs to the queue
@@ -150,19 +155,15 @@ class App(ctk.CTk):
         if not hasattr(self, 'queue_processor_thread') or not self.queue_processor_thread.is_alive():
             self.queue_processor_thread = threading.Thread(target=self._process_download_queue, daemon=True)
             self.queue_processor_thread.start()
-
-        # Wait for all tasks in the queue to be processed
-        self.download_queue.join()
-
-        # All downloads are finished, display completion message
-        self.after(0, lambda: self.log_message("\nAll downloads finished."))
-        self.after(0, lambda: messagebox.showinfo("Download Complete", "All requested models have been processed."))
         
-        # Reset main UI elements
-        self.after(0, lambda: self.download_button.configure(state="normal", text="Start Download"))
-        self.after(0, lambda: self.progress_label.configure(text="Progress: N/A"))
-        self.after(0, lambda: self.speed_label.configure(text="Speed: N/A"))
-        self.after(0, lambda: self.remaining_label.configure(text="Remaining: N/A"))
+        # This thread will wait for all tasks to be done and then re-enable the button
+        # It should not be daemonized if we want to join it gracefully
+        self.completion_watcher_thread = threading.Thread(target=self._watch_completion, args=(self.processing_and_completion_thread,), daemon=True)
+        self.completion_watcher_thread.start()
+
+        # The _initiate_download_process now just adds URLs and starts the queue processor.
+        # The completion logic is moved to _watch_completion.
+        # Removed premature completion messages from here.
 
     def _update_progress(self, bytes_downloaded, total_size, speed):
         if total_size > 0:
@@ -203,11 +204,11 @@ class App(ctk.CTk):
             urls = []
             if url_input_content.lower().endswith(".txt") and os.path.exists(url_input_content):
                 with open(url_input_content, 'r') as f:
-                    urls = [line.strip() for line in f if line.strip()]
+                    content = f.read()
+                urls = [line.strip() for line in content.split('\n') if line.strip()]
             else:
                 # Split URLs by new line for CTkTextbox input
                 urls = [line.strip() for line in url_input_content.split('\n') if line.strip()]
-
             if not urls:
                 self.log_message("No URLs provided. Exiting.")
                 messagebox.showinfo("Download Info", "No URLs provided.")
@@ -217,12 +218,22 @@ class App(ctk.CTk):
             
             # Add each URL as a task to the queue
             for url in urls:
+                # Validate URL format
+                parsed_url = urllib.parse.urlparse(url)
+                if not all([parsed_url.scheme, parsed_url.netloc]):
+                    self.log_message(f"Skipping invalid URL: {url}")
+                    # Add GUI element for the invalid task with a failed status
+                    task_id = f"task_{hash(url)}_{self.queue_row_counter}"
+                    self.after(0, self._add_download_task_ui, task_id, url)
+                    self.after(0, lambda id=task_id, msg="Invalid URL format": self.download_tasks[id]['status_label'].configure(text=f"Status: Failed - {msg}", text_color="red"))
+                    continue
                 # Create a unique ID for each download task
                 task_id = f"task_{hash(url)}_{self.queue_row_counter}"
-                self.download_queue.put({'task_id': task_id, 'url': url, 'api_key': api_key, 'download_path': download_path})
+                with self._queue_lock:
+                    self._download_queue_list.append({'task_id': task_id, 'url': url, 'api_key': api_key, 'download_path': download_path})
+                    self._queue_condition.notify() # Signal that a new item has been added
                 # Add GUI element for the new task
                 self.after(0, self._add_download_task_ui, task_id, url)
-
         except Exception as e:
             self.log_message(f"An unexpected error occurred while adding URLs to queue: {e}")
             messagebox.showerror("Unexpected Error", f"An unexpected error occurred while adding URLs to queue: {e}")
@@ -230,94 +241,251 @@ class App(ctk.CTk):
             # Re-enable the download button only after all URLs are added to the queue.
             # Actual download processing happens in _process_download_queue.
             self.after(0, lambda: self.download_button.configure(state="normal", text="Start Download"))
-
-
     def _add_download_task_ui(self, task_id, url):
         row = self.queue_row_counter
         self.queue_row_counter += 1
-
         task_frame = ctk.CTkFrame(self.queue_frame)
         task_frame.grid(row=row, column=0, padx=5, pady=5, sticky="ew")
         task_frame.grid_columnconfigure(1, weight=1)
-
         url_display = (url[:50] + '...') if len(url) > 53 else url
         task_label = ctk.CTkLabel(task_frame, text=f"URL: {url_display}", anchor="w")
         task_label.grid(row=0, column=0, padx=5, pady=2, sticky="w")
-
         progress_bar = ctk.CTkProgressBar(task_frame, orientation="horizontal")
         progress_bar.set(0)
         progress_bar.grid(row=1, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
-
         status_label = ctk.CTkLabel(task_frame, text="Status: Pending", anchor="w")
         status_label.grid(row=2, column=0, padx=5, pady=2, sticky="w")
-
         # Store references to update later
         self.download_tasks[task_id] = {
             'frame': task_frame,
             'label': task_label,
             'progress_bar': progress_bar,
             'status_label': status_label,
-            'url': url # Store original URL for full display if needed
+            'url': url, # Store original URL for full display if needed
+            'stop_event': threading.Event(), # Per-task stop event
+            'pause_event': threading.Event(), # Per-task pause event
+            'cancel_button': None, # Placeholder for cancel button reference
+            'pause_button': None, # Placeholder for pause button reference
+            'resume_button': None # Placeholder for resume button reference
         }
+        # Control Buttons Frame
+        button_frame = ctk.CTkFrame(task_frame, fg_color="transparent")
+        button_frame.grid(row=0, column=2, padx=5, pady=2, sticky="e")
+        button_frame.grid_columnconfigure(0, weight=1) # For pause
+        button_frame.grid_columnconfigure(1, weight=1) # For resume
+        button_frame.grid_columnconfigure(2, weight=1) # For cancel
+        button_frame.grid_columnconfigure(3, weight=1) # For up
+        button_frame.grid_columnconfigure(4, weight=1) # For down
+        # Add Pause Button
+        pause_button = ctk.CTkButton(button_frame, text="Pause", command=lambda tid=task_id: self.pause_download(tid))
+        pause_button.grid(row=0, column=0, padx=2, pady=0, sticky="ew")
+        self.download_tasks[task_id]['pause_button'] = pause_button
+        # Add Resume Button (initially disabled)
+        resume_button = ctk.CTkButton(button_frame, text="Resume", command=lambda tid=task_id: self.resume_download(tid), state="disabled")
+        resume_button.grid(row=0, column=1, padx=2, pady=0, sticky="ew")
+        self.download_tasks[task_id]['resume_button'] = resume_button
+        
+        # Add Cancel Button
+        cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=lambda tid=task_id: self.cancel_download(tid))
+        cancel_button.grid(row=0, column=2, padx=2, pady=0, sticky="ew")
+        self.download_tasks[task_id]['cancel_button'] = cancel_button
+        # Add Move Up Button
+        move_up_button = ctk.CTkButton(button_frame, text="▲", command=lambda tid=task_id: self.move_task_up(tid), width=30)
+        move_up_button.grid(row=0, column=3, padx=2, pady=0, sticky="ew")
+        self.download_tasks[task_id]['move_up_button'] = move_up_button
+        # Add Move Down Button
+        move_down_button = ctk.CTkButton(button_frame, text="▼", command=lambda tid=task_id: self.move_task_down(tid), width=30)
+        move_down_button.grid(row=0, column=4, padx=2, pady=0, sticky="ew")
+        self.download_tasks[task_id]['move_down_button'] = move_down_button
     
-    def _process_download_queue(self):
+    def cancel_download(self, task_id):
+        if task_id in self.download_tasks:
+            task = self.download_tasks[task_id]
+            task['stop_event'].set()
+            task['status_label'].configure(text="Status: Cancelling...", text_color="orange")
+            if task['cancel_button']:
+                task['cancel_button'].configure(state="disabled", text="Cancelled")
+            if task['pause_button']:
+                task['pause_button'].configure(state="disabled")
+            if task['resume_button']:
+                task['resume_button'].configure(state="disabled")
+            self.log_message(f"Cancellation requested for task: {task['url']}")
+    def pause_download(self, task_id):
+        if task_id in self.download_tasks:
+            task = self.download_tasks[task_id]
+            task['pause_event'].set() # Set the event to signal pause
+            task['status_label'].configure(text="Status: Paused", text_color="blue")
+            if task['pause_button']:
+                task['pause_button'].configure(state="disabled")
+            if task['resume_button']:
+                task['resume_button'].configure(state="normal")
+            self.log_message(f"Pause requested for task: {task['url']}")
+    def resume_download(self, task_id):
+        if task_id in self.download_tasks:
+            task = self.download_tasks[task_id]
+            task['pause_event'].clear() # Clear the event to signal resume
+            task['status_label'].configure(text="Status: Resuming...", text_color="green")
+            if task['pause_button']:
+                task['pause_button'].configure(state="normal")
+            if task['resume_button']:
+                task['resume_button'].configure(state="disabled")
+            self.log_message(f"Resume requested for task: {task['url']}")
+ 
+    def _cleanup_task_ui(self, task_id):
+        # Ensure cleanup is called on the main thread to avoid race conditions
+        self.after(0, lambda: self.__cleanup_task_ui_internal(task_id))
+    def __cleanup_task_ui_internal(self, task_id):
+        if task_id in self.download_tasks:
+            self.download_tasks[task_id]['frame'].destroy() # Destroy UI frame
+            del self.download_tasks[task_id] # Remove from tracking
+            self._update_queue_ui_order() # Re-grid remaining tasks
+ 
+    def move_task_up(self, task_id):
+        with self._queue_lock:
+            current_index = -1
+            for i, task_item in enumerate(self._download_queue_list):
+                if task_item['task_id'] == task_id:
+                    current_index = i
+                    break
+            
+            if current_index > 0:
+                # Swap the tasks in the list
+                self._download_queue_list[current_index], self._download_queue_list[current_index - 1] = \
+                    self._download_queue_list[current_index - 1], self._download_queue_list[current_index]
+                self.log_message(f"Moved task {self.download_tasks[task_id]['url']} up in queue.")
+                self._update_queue_ui_order() # Update UI to reflect new order
+            else:
+                self.log_message(f"Task {self.download_tasks[task_id]['url']} is already at the top of the queue.")
+    def move_task_down(self, task_id):
+        with self._queue_lock:
+            current_index = -1
+            for i, task_item in enumerate(self._download_queue_list):
+                if task_item['task_id'] == task_id:
+                    current_index = i
+                    break
+            
+            if current_index != -1 and current_index < len(self._download_queue_list) - 1:
+                # Swap the tasks in the list
+                self._download_queue_list[current_index], self._download_queue_list[current_index + 1] = \
+                    self._download_queue_list[current_index + 1], self._download_queue_list[current_index]
+                self.log_message(f"Moved task {self.download_tasks[task_id]['url']} down in queue.")
+                self._update_queue_ui_order() # Update UI to reflect new order
+            else:
+                self.log_message(f"Task {self.download_tasks[task_id]['url']} is already at the bottom of the queue.")
+    def _update_queue_ui_order(self):
+        # This function needs to be called from the main thread
+        self.after(0, self.__update_queue_ui_order_internal)
+    def __update_queue_ui_order_internal(self):
+        # Re-grid all task frames based on their current order in _download_queue_list
+        with self._queue_lock:
+            for i, task_item in enumerate(self._download_queue_list):
+                task_id = task_item['task_id']
+                if task_id in self.download_tasks:
+                    task_frame = self.download_tasks[task_id]['frame']
+                    task_frame.grid(row=i, column=0, padx=5, pady=5, sticky="ew")
+        
+        # After re-gridding, ensure the scrollable frame updates its view
+        self.queue_frame.update_idletasks() # Force update layout
+    def _watch_completion(self, processing_thread):
+        processing_thread.join() # Wait for all URLs to be added to the queue
+        
+        # Wait for the download queue to be empty
         while True:
-            try:
-                task = self.download_queue.get(timeout=1) # Wait for 1 second for a task
+            with self._queue_lock:
+                # Check if there are no pending tasks in the list and no active tasks being processed
+                # This assumes tasks are removed from download_tasks when they are truly done (Completed/Failed/Cancelled)
+                if not self._download_queue_list and not self.download_tasks:
+                    break
+            time.sleep(0.5) # Wait a bit before re-checking
+        if not self.stop_event.is_set(): # Only show completion if not shutting down
+            self.after(0, lambda: self.log_message("\nAll downloads finished."))
+            self.after(0, lambda: messagebox.showinfo("Download Complete", "All requested models have been processed."))
+            
+            # Reset main UI elements
+            self.after(0, lambda: self.download_button.configure(state="normal", text="Start Download"))
+            self.after(0, lambda: self.progress_label.configure(text="Progress: N/A"))
+            self.after(0, lambda: self.speed_label.configure(text="Speed: N/A"))
+            self.after(0, lambda: self.remaining_label.configure(text="Remaining: N/A"))
+    def _process_download_queue(self):
+        while not self.stop_event.is_set():
+            task = None
+            with self._queue_lock:
+                while not self._download_queue_list and not self.stop_event.is_set():
+                    self._queue_condition.wait(timeout=0.5) # Wait for new tasks or shutdown signal
+                
+                if self.stop_event.is_set(): # Check after waiting
+                    break
+                
+                if self._download_queue_list:
+                    task = self._download_queue_list.pop(0) # Get the first task
+            
+            if task:
                 task_id = task['task_id']
                 url = task['url']
                 api_key = task['api_key']
                 download_path = task['download_path']
-
-                self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Fetching Info..."))
-                self.log_message(f"\nProcessing URL: {url}")
                 
-                model_info, error_message = get_model_info_from_url(url, api_key)
-                if error_message:
-                    self.after(0, lambda id=task_id, msg=error_message: self.download_tasks[id]['status_label'].configure(text=f"Status: Failed - {msg}"))
-                    self.log_message(f"Error retrieving model info for {url}: {error_message}")
-                    messagebox.showerror("Download Error", f"Could not retrieve model information for URL: {url}\nError: {error_message}")
-                    self.download_queue.task_done()
+                # Retrieve task_stop_event after popping as the task_id might be new
+                if task_id not in self.download_tasks: # Should not happen if _add_download_task_ui is called first
+                    self.log_message(f"Error: Task {task_id} not found in download_tasks dictionary. Skipping.")
                     continue
-
-                # Check if model is already downloaded
-                if is_model_downloaded(model_info, download_path):
-                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Already Downloaded"))
-                    self.log_message(f"Model {model_info['model']['name']} v{model_info['name']} already downloaded. Skipping.")
-                    self.download_queue.task_done()
+                task_stop_event = self.download_tasks[task_id]['stop_event']
+                
+                # Handle task cancelled before processing
+                if task_stop_event.is_set():
+                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Cancelled", text_color="red"))
+                    self.log_message(f"Task {url} was cancelled before processing. Skipping.")
+                    self._cleanup_task_ui(task_id) # Call helper for cleanup
                     continue
-
-
-                # Define a specific progress callback for this task
-                def task_progress_callback(bytes_downloaded, total_size, speed):
-                    self.after(0, self._update_task_progress_ui, task_id, bytes_downloaded, total_size, speed)
-
-                self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Downloading..."))
-                download_error = download_civitai_model(model_info, download_path, api_key, progress_callback=task_progress_callback)
-                
-                if download_error:
-                    self.after(0, lambda id=task_id, err=download_error: self.download_tasks[id]['status_label'].configure(text=f"Status: Failed - {err}"))
-                    self.log_message(f"Download failed for {url}: {download_error}")
-                    messagebox.showerror("Download Error", f"Download failed for {url}\nError: {download_error}")
-                else:
-                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Complete"))
-                    self.log_message(f"Download complete for {url}")
-                
-                self.download_queue.task_done()
-            except queue.Empty:
-                # No tasks in queue, can add a sleep or break if no more tasks are expected
-                # For a daemon thread, it will just keep looping and waiting
-                time.sleep(1) # Sleep to prevent busy-waiting
-            except Exception as e:
-                self.log_message(f"An unexpected error occurred during queue processing: {e}")
-                self.download_queue.task_done() # Mark task as done even if it failed unexpectedly
-                # Optionally, update UI for the task to show unexpected error
-                if 'task_id' in locals() and task_id in self.download_tasks:
-                    self.after(0, lambda id=task_id, err=e: self.download_tasks[id]['status_label'].configure(text=f"Status: Unexpected Error - {err}"))
+                try:
+                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Fetching Info..."))
+                    self.log_message(f"\nProcessing URL: {url}")
+                    
+                    model_info, error_message = get_model_info_from_url(url, api_key)
+                    if error_message:
+                        self.after(0, lambda id=task_id, msg=error_message: self.download_tasks[id]['status_label'].configure(text=f"Status: Failed - {msg}", text_color="red"))
+                        self.log_message(f"Error retrieving model info for {url}: {error_message}")
+                        messagebox.showerror("Download Error", f"Could not retrieve model information for URL: {url}\nError: {error_message}")
+                        self._cleanup_task_ui(task_id) # Call helper for cleanup
+                        continue
+                    # Check if model is already downloaded
+                    if is_model_downloaded(model_info, download_path):
+                        self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Already Downloaded"))
+                        self.log_message(f"Model {model_info['model']['name']} v{model_info['name']} already downloaded. Skipping.")
+                        self._cleanup_task_ui(task_id) # Call helper for cleanup
+                        continue
+                    # Define a specific progress callback for this task
+                    def task_progress_callback(bytes_downloaded, total_size, speed):
+                        self.after(0, self._update_task_progress_ui, task_id, bytes_downloaded, total_size, speed)
+                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Downloading..."))
+                    download_error = download_civitai_model(model_info, download_path, api_key, progress_callback=task_progress_callback, stop_event=task_stop_event, pause_event=self.download_tasks[task_id]['pause_event'])
+                    
+                    if download_error:
+                        self.after(0, lambda id=task_id, err=download_error: self.download_tasks[id]['status_label'].configure(text=f"Status: Failed - {err}", text_color="red"))
+                        self.log_message(f"Download failed for {url}: {download_error}")
+                        messagebox.showerror("Download Error", f"Download failed for {url}\nError: {download_error}")
+                        self._cleanup_task_ui(task_id) # Call helper for cleanup
+                    else:
+                        self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Complete", text_color="green"))
+                        self.log_message(f"Download complete for {url}")
+                        self._cleanup_task_ui(task_id) # Call helper for cleanup
+                    
+                except Exception as e:
+                    self.log_message(f"An unexpected error occurred during queue processing: {e}")
+                    if 'task_id' in locals() and task_id in self.download_tasks:
+                        self.after(0, lambda id=task_id, err=e: self.download_tasks[id]['status_label'].configure(text=f"Status: Unexpected Error - {err}", text_color="red"))
+                        self._cleanup_task_ui(task_id) # Call helper for cleanup
+                finally:
+                    # The cleanup is now handled explicitly in each branch (continue, if/else, except).
+                    # This finally block is no longer needed for cleanup.
+                    pass
+        self.log_message("Download queue processing stopped.") # Log when the thread actually stops
     
     def _update_task_progress_ui(self, task_id, bytes_downloaded, total_size, speed):
         if task_id in self.download_tasks:
             task = self.download_tasks[task_id]
+            if task['pause_event'].is_set(): # Don't update progress if paused
+                return
             if total_size > 0:
                 progress_percent = (bytes_downloaded / total_size) * 100
                 task['progress_bar'].set(progress_percent / 100)
@@ -337,6 +505,36 @@ class App(ctk.CTk):
             else:
                 self.remaining_label.configure(text="Remaining: Calculating...")
  
+    def _on_closing(self):
+        if messagebox.askokcancel("Quit", "Do you want to quit? Ongoing downloads will be interrupted."):
+            self.stop_event.set() # Signal main queue processing thread to stop
+            self.log_message("Shutdown initiated. Signalling individual downloads to stop...")
+            # Signal all individual download threads to stop and clear pause events
+            for task_id, task_data in list(self.download_tasks.items()): # Iterate over a copy as dict might change
+                if 'stop_event' in task_data:
+                    task_data['stop_event'].set()
+                if 'pause_event' in task_data: # Clear pause event to unblock any waiting threads
+                    task_data['pause_event'].clear()
+                if task_data.get('cancel_button'):
+                    task_data['cancel_button'].configure(state="disabled", text="Stopping...")
+                if task_data.get('pause_button'):
+                    task_data['pause_button'].configure(state="disabled")
+                if task_data.get('resume_button'):
+                    task_data['resume_button'].configure(state="disabled")
+            self.log_message("Waiting for threads to finish...")
+            
+            # Wait for the queue processor thread to finish
+            if hasattr(self, 'queue_processor_thread') and self.queue_processor_thread.is_alive():
+                self.queue_processor_thread.join(timeout=5) # Give it some time to clean up
+                if self.queue_processor_thread.is_alive():
+                    self.log_message("Queue processor thread did not terminate gracefully.")
+            
+            # Wait for the completion watcher thread to finish
+            if hasattr(self, 'completion_watcher_thread') and self.completion_watcher_thread.is_alive():
+                self.completion_watcher_thread.join(timeout=5)
+                if self.completion_watcher_thread.is_alive():
+                    self.log_message("Completion watcher thread did not terminate gracefully.")
+            self.destroy() # Close the main window
     def clear_gui(self):
         self.url_entry.delete("1.0", ctk.END)
         # Only clear the URL entry as requested
@@ -344,7 +542,6 @@ class App(ctk.CTk):
         self.log_message("URL input cleared.")
         # Do not reset other fields or download queue display
         # As per the new requirement, "Clear GUI" only clears the current URLs.
-
 if __name__ == "__main__":
     app = App()
     app.mainloop()

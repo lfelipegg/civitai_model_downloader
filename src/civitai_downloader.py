@@ -3,8 +3,35 @@ import requests
 import re
 import time
 import hashlib
+from functools import wraps
+import shutil
 
 CIVITAI_BASE_URL = "https://civitai.com/api/v1"
+
+def retry(exceptions, tries=4, delay=3, backoff=2):
+    """
+    Retry calling the decorated function using an exponential backoff.
+    Args:
+        exceptions: An exception or tuple of exceptions to catch.
+        tries: The maximum number of attempts.
+        delay: Initial delay between retries in seconds.
+        backoff: Multiplier applied to delay after each retry.
+    """
+    def deco_retry(f):
+        @wraps(f)
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 1:
+                try:
+                    return f(*args, **kwargs)
+                except exceptions as e:
+                    print(f"Error: {e}, Retrying in {mdelay} seconds...")
+                    time.sleep(mdelay)
+                    mtries -= 1
+                    mdelay *= backoff
+            return f(*args, **kwargs) # Last attempt
+        return f_retry
+    return deco_retry
 
 def get_model_info_from_url(url, api_key):
     """
@@ -27,8 +54,13 @@ def get_model_info_from_url(url, api_key):
         endpoint = f"{CIVITAI_BASE_URL}/model-versions/{model_version_id}"
         print(f"Fetching specific model version info from: {endpoint}")
         try:
-            response = requests.get(endpoint, headers=headers)
-            response.raise_for_status()
+            @retry(exceptions=(requests.exceptions.HTTPError, requests.exceptions.RequestException), tries=3, delay=2, backoff=2)
+            def _get_response_with_retry(url, headers):
+                response = requests.get(url, headers=headers)
+                response.raise_for_status()
+                return response
+
+            response = _get_response_with_retry(endpoint, headers)
             return response.json(), None
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
@@ -46,8 +78,14 @@ def get_model_info_from_url(url, api_key):
         try:
             endpoint = f"{CIVITAI_BASE_URL}/models/{model_id}"
             print(f"Fetching model info from: {endpoint}")
-            response = requests.get(endpoint, headers=headers)
-            response.raise_for_status()
+            
+            @retry(exceptions=(requests.exceptions.HTTPError, requests.exceptions.RequestException), tries=3, delay=2, backoff=2)
+            def _get_model_response_with_retry(url, headers):
+                response = requests.get(url, headers=headers)
+                response.raise_for_status()
+                return response
+
+            response = _get_model_response_with_retry(endpoint, headers)
             model_info = response.json()
             if model_info and model_info.get('modelVersions'):
                 # Find the latest version by checking the 'createdAt' or 'updatedAt' field,
@@ -56,8 +94,7 @@ def get_model_info_from_url(url, api_key):
                 latest_version = model_info['modelVersions'][0]
                 endpoint = f"{CIVITAI_BASE_URL}/model-versions/{latest_version['id']}"
                 print(f"Fetching latest model version info from: {endpoint}")
-                response = requests.get(endpoint, headers=headers)
-                response.raise_for_status()
+                response = _get_model_response_with_retry(endpoint, headers) # Use retry for this call too
                 return response.json(), None
             return None, f"No model versions found for model ID: {model_id}"
         except requests.exceptions.HTTPError as e:
@@ -73,7 +110,7 @@ def get_model_info_from_url(url, api_key):
             return None, f"Network Error: Could not connect to Civitai API. {e}"
     return None, "Invalid Civitai URL provided."
 
-def download_file(url, path, api_key=None, progress_callback=None, expected_sha256=None):
+def download_file(url, path, api_key=None, progress_callback=None, expected_sha256=None, stop_event=None, pause_event=None):
     """Downloads a file from a URL to a specified path with progress updates and SHA256 verification."""
     print(f"Downloading {url} to {path}")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -89,8 +126,13 @@ def download_file(url, path, api_key=None, progress_callback=None, expected_sha2
         print(f"Starting new download for {os.path.basename(path)}.")
 
     try:
-        response = requests.get(url, stream=True, headers=headers)
-        response.raise_for_status()
+        @retry(exceptions=(requests.exceptions.HTTPError, requests.exceptions.RequestException), tries=3, delay=2, backoff=2)
+        def _download_response_with_retry(url, headers, stream):
+            response = requests.get(url, stream=stream, headers=headers)
+            response.raise_for_status()
+            return response
+        
+        response = _download_response_with_retry(url, headers, True)
     except requests.exceptions.HTTPError as e:
         # If server doesn't support Range and returns 416, restart download
         if e.response.status_code == 416: # Range Not Satisfiable
@@ -118,6 +160,15 @@ def download_file(url, path, api_key=None, progress_callback=None, expected_sha2
 
     with open(path, file_mode) as f:
         for chunk in response.iter_content(chunk_size=8192):
+            if stop_event and stop_event.is_set():
+                print(f"Download of {os.path.basename(path)} interrupted.")
+                return "Download interrupted by user."
+            
+            if pause_event and pause_event.is_set():
+                print(f"Download of {os.path.basename(path)} paused. Waiting to resume...")
+                pause_event.wait() # Block until cleared
+                print(f"Download of {os.path.basename(path)} resumed.")
+
             f.write(chunk)
             sha256_hash.update(chunk)
             bytes_downloaded += len(chunk)
@@ -215,7 +266,20 @@ def is_model_downloaded(model_info, download_base_path):
     print(f"Model {model_name} v{model_version_name} appears to be already downloaded.")
     return True
 
-def download_civitai_model(model_info, download_base_path, api_key, progress_callback=None):
+def check_disk_space(path, required_bytes):
+    """
+    Checks if there is enough disk space in the given path.
+    Returns None if sufficient, or an error message if insufficient.
+    """
+    try:
+        total, used, free = shutil.disk_usage(path)
+        if free < required_bytes:
+            return f"Insufficient disk space. Required: {required_bytes / (1024**3):.2f} GB, Available: {free / (1024**3):.2f} GB."
+        return None
+    except Exception as e:
+        return f"Error checking disk space: {e}"
+
+def download_civitai_model(model_info, download_base_path, api_key, progress_callback=None, stop_event=None, pause_event=None):
     """
     Downloads a Civitai model, its images, and saves metadata.
     Creates the directory structure: ./{{base_model}}/{{type}}/{{Model_name}}/{{Model_version}}/
@@ -252,7 +316,14 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
         model_download_url = model_file['downloadUrl']
         model_filename = model_file['name']
         expected_sha256 = model_file['hashes'].get('SHA256') # Get SHA256 hash
-        download_error = download_file(model_download_url, os.path.join(target_dir, model_filename), api_key, progress_callback=progress_callback, expected_sha256=expected_sha256)
+
+        # Check disk space before downloading
+        required_bytes = model_file['sizeKB'] * 1024 # Convert KB to bytes
+        disk_space_error = check_disk_space(target_dir, required_bytes)
+        if disk_space_error:
+            return disk_space_error
+
+        download_error = download_file(model_download_url, os.path.join(target_dir, model_filename), api_key, progress_callback=progress_callback, expected_sha256=expected_sha256, stop_event=stop_event, pause_event=pause_event)
         if download_error:
             return f"Failed to download model file: {download_error}"
     else:
@@ -265,7 +336,7 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
             image_name = f"image_{i}{os.path.splitext(image_url)[1]}" # Get extension from URL
             # For images, we can pass a specific callback or use the general one.
             # Let's use the general one for now, as GUI can differentiate based on context if needed.
-            download_error = download_file(image_url, os.path.join(target_dir, image_name), api_key, progress_callback=progress_callback)
+            download_error = download_file(image_url, os.path.join(target_dir, image_name), api_key, progress_callback=progress_callback, stop_event=stop_event, pause_event=pause_event)
             if download_error:
                 print(f"Warning: Failed to download image {image_name}: {download_error}")
 
