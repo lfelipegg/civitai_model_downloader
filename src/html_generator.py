@@ -60,6 +60,18 @@ def generate_html_report(model_info, output_dir):
             margin-top: 0;
             font-weight: normal;
         }}
+        .civitai-links {{
+            margin-top: 15px;
+            font-size: 0.9em;
+        }}
+        .civitai-links a {{
+            color: #007bff;
+            text-decoration: none;
+            margin: 0 10px;
+        }}
+        .civitai-links a:hover {{
+            text-decoration: underline;
+        }}
         .stats-container {{
             display: flex;
             justify-content: center;
@@ -269,6 +281,10 @@ def generate_html_report(model_info, output_dir):
                     <strong>{rating:.2f} ({rating_count})</strong>
                     Rating
                 </div>
+            </div>
+            <div class="civitai-links">
+                <a href="https://civitai.com/models/{model_info['modelId']}" target="_blank">View Model on Civitai</a>
+                <a href="https://civitai.com/models/{model_info['modelId']}?modelVersionId={model_info['id']}" target="_blank">View Version on Civitai</a>
             </div>
         </header>
 

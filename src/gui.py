@@ -44,7 +44,7 @@ class App(ctk.CTk):
         # Move API key and download path labels down due to increased URL entry height
         self.api_key_label = ctk.CTkLabel(self.input_frame, text="Civitai API Key:")
         self.api_key_label.grid(row=1, column=0, padx=10, pady=(10, 5), sticky="w")
-        self.api_key_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Enter your Civitai API Key (optional)")
+        self.api_key_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Enter your Civitai API Key (optional)", show="*")
         self.api_key_entry.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
 
         # Download Path Input
@@ -67,6 +67,10 @@ class App(ctk.CTk):
         # Open Download Folder Button
         self.open_folder_button = ctk.CTkButton(self, text="Open Downloads Folder", command=self.open_download_folder)
         self.open_folder_button.grid(row=1, column=1, padx=(10, 20), pady=10, sticky="ew")
+
+        # Clear/Reset Button
+        self.clear_button = ctk.CTkButton(self, text="Clear/Reset GUI", command=self.clear_gui)
+        self.clear_button.grid(row=8, column=0, columnspan=2, padx=20, pady=10, sticky="ew")
 
         # Download Stats Labels
         self.progress_label = ctk.CTkLabel(self, text="Progress: N/A")
@@ -283,12 +287,6 @@ class App(ctk.CTk):
                     self.download_queue.task_done()
                     continue
 
-                # Check if model is already downloaded
-                if is_model_downloaded(model_info, download_path):
-                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Already Downloaded"))
-                    self.log_message(f"Model {model_info['model']['name']} v{model_info['name']} already downloaded. Skipping.")
-                    self.download_queue.task_done()
-                    continue
 
                 # Define a specific progress callback for this task
                 def task_progress_callback(bytes_downloaded, total_size, speed):
@@ -339,6 +337,14 @@ class App(ctk.CTk):
             else:
                 self.remaining_label.configure(text="Remaining: Calculating...")
  
+    def clear_gui(self):
+        self.url_entry.delete("1.0", ctk.END)
+        # Only clear the URL entry as requested
+        
+        self.log_message("URL input cleared.")
+        # Do not reset other fields or download queue display
+        # As per the new requirement, "Clear GUI" only clears the current URLs.
+
 if __name__ == "__main__":
     app = App()
     app.mainloop()
