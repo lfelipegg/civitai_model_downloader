@@ -174,72 +174,6 @@ class App(ctk.CTk):
             for url in urls:
                 self.log_message(f"\nProcessing URL: {url}")
                 try:
-                    # Temporarily override download_file to use the GUI's progress callback
-                    original_download_file = download_file
-                    
-                    def gui_download_file_wrapper(url, path, api_key=None):
-                        original_download_file(url, path, api_key, progress_callback=self._update_progress)
-                    
-                    # Monkey-patching download_file for this specific download
-                    from src.civitai_downloader import download_file as original_download_file_ref
-                    original_download_file_ref = original_download_file # Store reference to original
-                    
-                    # This is tricky because download_civitai_model directly calls download_file
-                    # We need to make download_civitai_model aware of our progress callback
-                    # A better way is to modify download_civitai_model to accept a callback
-                    # However, for this iteration, I'll try to pass it down or update it if possible.
-
-                    # Re-importing to ensure we get the latest definition
-                    from src.civitai_downloader import download_civitai_model as civitai_downloader_func
-
-                    # This is a bit of a hack, but for demonstration, we'll try to pass the callback
-                    # down or make download_civitai_model call a version of download_file that uses it.
-                    # The previous change to civitai_downloader.py already added progress_callback to download_file
-                    # Now we need to ensure download_civitai_model calls download_file with that callback.
-
-                    # Since download_civitai_model already uses lambda functions for progress,
-                    # we need to make those lambdas update the GUI.
-                    # This means we need to modify download_civitai_model itself again,
-                    # or make a wrapper around it that takes the GUI callback.
-
-                    # Let's revert the lambda changes in civitai_downloader.py first,
-                    # and then pass the callback from gui.py.
-
-                    # For now, let's just make sure the `_update_progress` is called.
-                    # This requires `download_civitai_model` to pass the callback.
-                    # I will assume that the modification to `download_civitai_model` in the previous step
-                    # was a placeholder and will be replaced by a more direct way to pass the callback.
-                    # For now, I will modify the call to `download_civitai_model` here.
-
-                    # This is the correct way: pass the callback down to download_civitai_model
-                    # which then passes it to download_file.
-                    # Since download_civitai_model currently has hardcoded print lambdas,
-                    # I need to adjust it to accept a callback for model and image downloads.
-                    # This means I need to re-read civitai_downloader.py and modify it further.
-
-                    # For now, I will comment out the download_civitai_model call and add a placeholder.
-                    # This will allow me to apply the GUI changes first.
-                    # Then I'll go back to civitai_downloader.py.
-
-                    # Placeholder for actual download logic
-                    # download_civitai_model(model_info, download_path, api_key)
-                    # For immediate GUI update, I'll simulate progress.
-                    
-                    # Let's call the original download_civitai_model, but we need to ensure
-                    # its internal calls to download_file use our GUI callback.
-                    # This means download_civitai_model needs to accept and pass a callback.
-
-                    # Reverting the `download_civitai_model` part of previous diff
-                    # and making it accept a callback.
-
-                    # Ok, a simpler approach for now to get the GUI working for download stats:
-                    # I will modify download_file in civitai_downloader.py to use the callback IF provided.
-                    # Then, in download_civitai_model, I will pass this callback from the GUI.
-                    # The previous diff already did this for download_file.
-                    # Now I need to modify download_civitai_model.
-                    # This means the current `apply_diff` for `gui.py` needs to be applied first,
-                    # then I will modify `civitai_downloader.py` again.
-
                     model_info, error_message = get_model_info_from_url(url, api_key)
                     if error_message:
                         self.log_message(f"Error retrieving model info for {url}: {error_message}")
@@ -267,7 +201,7 @@ class App(ctk.CTk):
             self.progress_label.configure(text="Progress: N/A")
             self.speed_label.configure(text="Speed: N/A")
             self.remaining_label.configure(text="Remaining: N/A")
-
+ 
 if __name__ == "__main__":
     app = App()
     app.mainloop()

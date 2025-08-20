@@ -50,6 +50,9 @@ def get_model_info_from_url(url, api_key):
             response.raise_for_status()
             model_info = response.json()
             if model_info and model_info.get('modelVersions'):
+                # Find the latest version by checking the 'createdAt' or 'updatedAt' field,
+                # or assume the first one is the latest if no specific ordering is guaranteed by the API
+                # For now, keeping the existing logic of assuming the first is latest, as per original code.
                 latest_version = model_info['modelVersions'][0]
                 endpoint = f"{CIVITAI_BASE_URL}/model-versions/{latest_version['id']}"
                 print(f"Fetching latest model version info from: {endpoint}")
