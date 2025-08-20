@@ -1,5 +1,6 @@
 import os
 import json
+import html
 
 def generate_html_report(model_info, output_dir):
     """
@@ -291,7 +292,7 @@ def generate_html_report(model_info, output_dir):
         </div>
 
         <h3 class="section-title">Description</h3>
-        <pre>{description if description else 'No description provided.'}</pre>
+        <pre>{html.escape(description) if description else 'No description provided.'}</pre>
 
         <h3 class="section-title">Trigger Words</h3>
         <div class="trigger-words">

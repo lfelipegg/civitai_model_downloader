@@ -77,21 +77,46 @@ def download_file(url, path, api_key=None, progress_callback=None, expected_sha2
     """Downloads a file from a URL to a specified path with progress updates and SHA256 verification."""
     print(f"Downloading {url} to {path}")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    file_mode = 'wb'
+    current_size = 0
+
+    if os.path.exists(path):
+        current_size = os.path.getsize(path)
+        headers['Range'] = f"bytes={current_size}-"
+        file_mode = 'ab'
+        print(f"Resuming download for {os.path.basename(path)} from {current_size} bytes.")
+    else:
+        print(f"Starting new download for {os.path.basename(path)}.")
+
     try:
         response = requests.get(url, stream=True, headers=headers)
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
+        # If server doesn't support Range and returns 416, restart download
+        if e.response.status_code == 416: # Range Not Satisfiable
+            print(f"Server does not support range requests or range is invalid. Restarting download for {os.path.basename(path)}.")
+            os.remove(path) # Delete incomplete file
+            return download_file(url, path, api_key, progress_callback, expected_sha256) # Restart without range header
         return f"HTTP Error during download: {e.response.status_code} - {e.response.reason}"
     except requests.exceptions.RequestException as e:
         return f"Network Error during download: {e}"
 
     total_size = int(response.headers.get('content-length', 0))
-    bytes_downloaded = 0
+    # If resuming, total_size from header is the remaining size, add current_size to get actual total
+    if file_mode == 'ab':
+        total_size += current_size
+
+    bytes_downloaded = current_size
     start_time = time.time()
     
     sha256_hash = hashlib.sha256()
+    # If resuming, need to hash existing content first
+    if current_size > 0 and file_mode == 'ab':
+        with open(path, 'rb') as f_existing:
+            for chunk in iter(lambda: f_existing.read(8192), b''):
+                sha256_hash.update(chunk)
 
-    with open(path, 'wb') as f:
+    with open(path, file_mode) as f:
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)
             sha256_hash.update(chunk)
@@ -124,6 +149,71 @@ def save_metadata(metadata, path):
     with open(path, 'w') as f:
         json.dump(metadata, f, indent=4)
     print(f"Metadata saved to {os.path.basename(path)}")
+
+def is_model_downloaded(model_info, download_base_path):
+    """
+    Checks if a model and its metadata are already downloaded.
+    """
+    model_name = model_info['model']['name']
+    model_version_name = model_info['name']
+    base_model = model_info['baseModel']
+    model_type = model_info['model']['type']
+
+    safe_model_name = sanitize_filename(model_name)
+    safe_model_version_name = sanitize_filename(model_version_name)
+    safe_base_model = sanitize_filename(base_model)
+    safe_model_type = sanitize_filename(model_type)
+
+    target_dir = os.path.join(
+        download_base_path,
+        safe_base_model,
+        safe_model_type,
+        safe_model_name,
+        safe_model_version_name
+    )
+
+    # Check for main model file
+    model_file = None
+    for file in model_info['files']:
+        if file['type'] == 'Model':
+            model_file = file
+            break
+    
+    if not model_file:
+        print(f"Warning: No main model file information found for {model_name} v{model_version_name}. Cannot verify download.")
+        return False # Cannot verify if main file info is missing
+
+    model_filepath = os.path.join(target_dir, model_file['name'])
+    if not os.path.exists(model_filepath):
+        return False
+    
+    # Basic size check (optional, but good for quick verification)
+    # Be cautious with exact size match due to potential server differences or partial downloads
+    # For now, just check if file exists and has some size
+    if os.path.getsize(model_filepath) == 0:
+        return False
+
+    # Check for metadata file
+    metadata_filepath = os.path.join(target_dir, "metadata.json")
+    if not os.path.exists(metadata_filepath):
+        return False
+    
+    # Optional: More rigorous SHA256 check for existing file
+    expected_sha256 = model_file['hashes'].get('SHA256')
+    if expected_sha256:
+        try:
+            with open(model_filepath, 'rb') as f:
+                actual_sha256 = hashlib.sha256(f.read()).hexdigest()
+            if actual_sha256.lower() != expected_sha256.lower():
+                print(f"SHA256 mismatch for existing file {os.path.basename(model_filepath)}. Re-download is needed.")
+                os.remove(model_filepath) # Remove the mismatched file to force re-download
+                return False
+        except Exception as e:
+            print(f"Error verifying SHA256 for {os.path.basename(model_filepath)}: {e}. Re-download is needed.")
+            return False
+
+    print(f"Model {model_name} v{model_version_name} appears to be already downloaded.")
+    return True
 
 def download_civitai_model(model_info, download_base_path, api_key, progress_callback=None):
     """

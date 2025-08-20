@@ -9,7 +9,7 @@ import subprocess
 import time
 
 # Assuming civitai_downloader functions are available
-from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file
+from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded
 import queue
 
 class App(ctk.CTk):
@@ -17,7 +17,7 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Civitai Model Downloader")
-        self.geometry("800x600")
+        self.geometry("800x800")
 
         self.download_queue = queue.Queue()
         self.download_tasks = {} # To hold references to download frames and progress bars
@@ -273,6 +273,20 @@ class App(ctk.CTk):
                     self.after(0, lambda id=task_id, msg=error_message: self.download_tasks[id]['status_label'].configure(text=f"Status: Failed - {msg}"))
                     self.log_message(f"Error retrieving model info for {url}: {error_message}")
                     messagebox.showerror("Download Error", f"Could not retrieve model information for URL: {url}\nError: {error_message}")
+                    self.download_queue.task_done()
+                    continue
+
+                # Check if model is already downloaded
+                if is_model_downloaded(model_info, download_path):
+                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Already Downloaded"))
+                    self.log_message(f"Model {model_info['model']['name']} v{model_info['name']} already downloaded. Skipping.")
+                    self.download_queue.task_done()
+                    continue
+
+                # Check if model is already downloaded
+                if is_model_downloaded(model_info, download_path):
+                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Already Downloaded"))
+                    self.log_message(f"Model {model_info['model']['name']} v{model_info['name']} already downloaded. Skipping.")
                     self.download_queue.task_done()
                     continue
 
