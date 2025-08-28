@@ -109,13 +109,16 @@ class HistoryManager:
         history_data = self._load_history()
         return history_data.get("downloads", [])
     
-    def search_downloads(self, query: str, search_fields: List[str] = None) -> List[Dict[str, Any]]:
+    def search_downloads(self, query: str = "", search_fields: List[str] = None, filters: Dict[str, Any] = None, sort_by: str = "download_date", sort_order: str = "desc") -> List[Dict[str, Any]]:
         """
-        Search downloads by query string.
+        Advanced search downloads with filtering and sorting.
         
         Args:
-            query: Search query
+            query: Search query string
             search_fields: Fields to search in. If None, searches in all text fields
+            filters: Dictionary of filter criteria
+            sort_by: Field to sort by
+            sort_order: "asc" or "desc"
             
         Returns:
             List of matching download entries
@@ -123,24 +126,123 @@ class HistoryManager:
         if search_fields is None:
             search_fields = ["model_name", "version_name", "model_type", "base_model", "trigger_words"]
         
-        query_lower = query.lower()
         downloads = self.get_all_downloads()
         results = []
         
+        # Apply text search
         for download in downloads:
-            # Check if query matches any of the specified fields
-            for field in search_fields:
-                value = download.get(field, "")
-                if isinstance(value, list):
-                    # Handle list fields like trigger_words
-                    if any(query_lower in str(item).lower() for item in value):
-                        results.append(download)
+            match_found = True
+            
+            # If query is provided, check text search
+            if query.strip():
+                query_lower = query.lower()
+                text_match = False
+                for field in search_fields:
+                    value = download.get(field, "")
+                    if isinstance(value, list):
+                        # Handle list fields like trigger_words
+                        if any(query_lower in str(item).lower() for item in value):
+                            text_match = True
+                            break
+                    elif query_lower in str(value).lower():
+                        text_match = True
                         break
-                elif query_lower in str(value).lower():
-                    results.append(download)
-                    break
+                match_found = text_match
+            
+            # Apply filters
+            if match_found and filters:
+                match_found = self._apply_filters(download, filters)
+            
+            if match_found:
+                results.append(download)
+        
+        # Apply sorting
+        results = self._sort_downloads(results, sort_by, sort_order)
         
         return results
+    
+    def _apply_filters(self, download: Dict[str, Any], filters: Dict[str, Any]) -> bool:
+        """Apply filter criteria to a download entry."""
+        
+        # Model type filter
+        if filters.get("model_types") and download.get("model_type") not in filters["model_types"]:
+            return False
+            
+        # Base model filter
+        if filters.get("base_models") and download.get("base_model") not in filters["base_models"]:
+            return False
+            
+        # Date range filter
+        date_from = filters.get("date_from")
+        date_to = filters.get("date_to")
+        if date_from or date_to:
+            try:
+                download_date = datetime.fromisoformat(download.get("download_date", "").replace('Z', '+00:00'))
+                if date_from and download_date < date_from:
+                    return False
+                if date_to and download_date > date_to:
+                    return False
+            except:
+                pass
+        
+        # File size filter
+        size_min = filters.get("size_min")
+        size_max = filters.get("size_max")
+        if size_min is not None or size_max is not None:
+            file_size_mb = download.get("file_size", 0) / (1024 * 1024)
+            if size_min is not None and file_size_mb < size_min:
+                return False
+            if size_max is not None and file_size_mb > size_max:
+                return False
+        
+        # Has trigger words filter
+        if filters.get("has_trigger_words") is not None:
+            has_triggers = bool(download.get("trigger_words", []))
+            if filters["has_trigger_words"] != has_triggers:
+                return False
+                
+        return True
+    
+    def _sort_downloads(self, downloads: List[Dict[str, Any]], sort_by: str, sort_order: str) -> List[Dict[str, Any]]:
+        """Sort downloads by specified criteria."""
+        
+        def get_sort_key(download):
+            if sort_by == "download_date":
+                try:
+                    return datetime.fromisoformat(download.get("download_date", "").replace('Z', '+00:00'))
+                except:
+                    return datetime.min
+            elif sort_by == "model_name":
+                return download.get("model_name", "").lower()
+            elif sort_by == "file_size":
+                return download.get("file_size", 0)
+            elif sort_by == "model_type":
+                return download.get("model_type", "").lower()
+            elif sort_by == "base_model":
+                return download.get("base_model", "").lower()
+            else:
+                return download.get(sort_by, "")
+        
+        reverse = sort_order == "desc"
+        return sorted(downloads, key=get_sort_key, reverse=reverse)
+    
+    def get_filter_options(self) -> Dict[str, List[str]]:
+        """Get available filter options from existing downloads."""
+        downloads = self.get_all_downloads()
+        
+        model_types = set()
+        base_models = set()
+        
+        for download in downloads:
+            if download.get("model_type"):
+                model_types.add(download["model_type"])
+            if download.get("base_model"):
+                base_models.add(download["base_model"])
+        
+        return {
+            "model_types": sorted(list(model_types)),
+            "base_models": sorted(list(base_models))
+        }
     
     def delete_download_entry(self, entry_id: str, delete_files: bool = False) -> bool:
         """

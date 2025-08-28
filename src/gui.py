@@ -13,6 +13,9 @@ import queue # For thread-safe progress updates
 # Assuming civitai_downloader functions are available
 from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded
 from src.history_manager import HistoryManager
+from src.progress_tracker import progress_manager, ProgressPhase, ProgressStats
+from src.thumbnail_manager import thumbnail_manager
+from src.enhanced_progress_bar import EnhancedProgressWidget, ThumbnailWidget
 
 class App(ctk.CTk):
     def __init__(self):
@@ -25,6 +28,7 @@ class App(ctk.CTk):
         self._queue_lock = threading.Lock() # Lock for thread-safe access to the queue list
         self._queue_condition = threading.Condition(self._queue_lock) # Condition for signaling queue changes
         self.download_tasks = {} # To hold references to download frames and progress bars
+        self.background_threads = {} # To track background threads for completion detection
         self.queue_row_counter = 0 # To manage grid placement in the queue_frame
         self.stop_event = threading.Event() # Event to signal threads to stop
         
@@ -93,23 +97,38 @@ class App(ctk.CTk):
                 if task['pause_event'].is_set():  # Don't update progress if paused
                     return
                 
-                if total_size > 0:
-                    progress_percent = (bytes_downloaded / total_size) * 100
-                    task['progress_bar'].set(progress_percent / 100)
-                    task['status_label'].configure(text=f"Status: Downloading... {bytes_downloaded / (1024*1024):.2f} MB / {total_size / (1024*1024):.2f} MB ({progress_percent:.2f}%)")
+                # Update enhanced progress tracker
+                if 'tracker' in task:
+                    tracker = task['tracker']
+                    tracker.set_phase(ProgressPhase.DOWNLOADING)
+                    stats = tracker.update_progress(bytes_downloaded, total_size)
+                    
+                    # Update enhanced progress widget
+                    if 'enhanced_progress' in task:
+                        task['enhanced_progress'].update_from_tracker(stats)
                 else:
-                    task['progress_bar'].set(0)
-                    task['status_label'].configure(text="Status: Downloading... (Unknown size)")
+                    # Fallback for backward compatibility
+                    if total_size > 0:
+                        progress_percent = (bytes_downloaded / total_size) * 100
+                        task['progress_bar'].set(progress_percent / 100)
+                    else:
+                        task['progress_bar'].set(0)
                 
-                # Update main speed/remaining labels
-                self.speed_label.configure(text=f"Speed: {speed / 1024:.2f} KB/s")
-                if speed > 0 and total_size > 0:
-                    remaining_bytes = total_size - bytes_downloaded
-                    remaining_time_sec = remaining_bytes / speed
-                    mins, secs = divmod(remaining_time_sec, 60)
-                    self.remaining_label.configure(text=f"Remaining: {int(mins)}m {int(secs)}s")
+                # Update main speed/remaining labels with enhanced formatting
+                if 'tracker' in task:
+                    formatted_stats = task['tracker'].get_formatted_stats()
+                    self.speed_label.configure(text=f"Speed: {formatted_stats.get('current_speed', '0 B/s')}")
+                    self.remaining_label.configure(text=f"ETA: {formatted_stats.get('eta', 'Unknown')}")
                 else:
-                    self.remaining_label.configure(text="Remaining: Calculating...")
+                    # Fallback formatting
+                    self.speed_label.configure(text=f"Speed: {speed / 1024:.2f} KB/s")
+                    if speed > 0 and total_size > 0:
+                        remaining_bytes = total_size - bytes_downloaded
+                        remaining_time_sec = remaining_bytes / speed
+                        mins, secs = divmod(remaining_time_sec, 60)
+                        self.remaining_label.configure(text=f"Remaining: {int(mins)}m {int(secs)}s")
+                    else:
+                        self.remaining_label.configure(text="Remaining: Calculating...")
                     
         except Exception as e:
             print(f"Error applying progress update: {e}")
@@ -193,7 +212,7 @@ class App(ctk.CTk):
         """Setup the download history tab."""
         # Configure grid layout for history tab
         self.history_tab.grid_columnconfigure(0, weight=1)
-        self.history_tab.grid_rowconfigure(2, weight=1)
+        self.history_tab.grid_rowconfigure(3, weight=1)  # Updated for new filter frame
         
         # Search frame
         self.search_frame = ctk.CTkFrame(self.history_tab)
@@ -213,9 +232,24 @@ class App(ctk.CTk):
         self.refresh_button = ctk.CTkButton(self.search_frame, text="Refresh", command=self.refresh_history)
         self.refresh_button.grid(row=0, column=3, padx=5, pady=10)
         
+        # Advanced filters frame
+        self.filters_frame = ctk.CTkFrame(self.history_tab)
+        self.filters_frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+        self.filters_frame.grid_columnconfigure(0, weight=1)
+        self.filters_frame.grid_columnconfigure(1, weight=1)
+        self.filters_frame.grid_columnconfigure(2, weight=1)
+        self.filters_frame.grid_columnconfigure(3, weight=1)
+        
+        # Initialize filter state
+        self.current_filters = {}
+        self.current_sort_by = "download_date"
+        self.current_sort_order = "desc"
+        
+        self._setup_filter_controls()
+        
         # Control buttons frame
         self.history_controls_frame = ctk.CTkFrame(self.history_tab)
-        self.history_controls_frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+        self.history_controls_frame.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
         
         self.scan_button = ctk.CTkButton(self.history_controls_frame, text="Scan Downloads", command=self.scan_downloads)
         self.scan_button.grid(row=0, column=0, padx=5, pady=5)
@@ -230,13 +264,114 @@ class App(ctk.CTk):
         self.stats_label = ctk.CTkLabel(self.history_controls_frame, text="")
         self.stats_label.grid(row=0, column=3, padx=20, pady=5, sticky="e")
         
+        # Active filters display frame
+        self.active_filters_frame = ctk.CTkFrame(self.history_controls_frame)
+        self.active_filters_frame.grid(row=1, column=0, columnspan=4, padx=5, pady=5, sticky="ew")
+        
         # History display
         self.history_frame = ctk.CTkScrollableFrame(self.history_tab, label_text="Download History")
-        self.history_frame.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
+        self.history_frame.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
         self.history_frame.grid_columnconfigure(0, weight=1)
         
         # Load initial history
         self.refresh_history()
+    
+    def _setup_filter_controls(self):
+        """Setup advanced filter controls."""
+        
+        # Row 1: Model type and base model filters
+        self.model_type_label = ctk.CTkLabel(self.filters_frame, text="Model Type:")
+        self.model_type_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        
+        self.model_type_var = tk.StringVar(value="All")
+        self.model_type_menu = ctk.CTkOptionMenu(
+            self.filters_frame,
+            values=["All"],
+            variable=self.model_type_var,
+            command=self._on_filter_changed
+        )
+        self.model_type_menu.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        
+        self.base_model_label = ctk.CTkLabel(self.filters_frame, text="Base Model:")
+        self.base_model_label.grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        
+        self.base_model_var = tk.StringVar(value="All")
+        self.base_model_menu = ctk.CTkOptionMenu(
+            self.filters_frame,
+            values=["All"],
+            variable=self.base_model_var,
+            command=self._on_filter_changed
+        )
+        self.base_model_menu.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
+        
+        # Row 2: Date range filters
+        self.date_from_label = ctk.CTkLabel(self.filters_frame, text="From Date:")
+        self.date_from_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        
+        self.date_from_entry = ctk.CTkEntry(self.filters_frame, placeholder_text="YYYY-MM-DD")
+        self.date_from_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        self.date_from_entry.bind("<KeyRelease>", self._on_filter_changed)
+        
+        self.date_to_label = ctk.CTkLabel(self.filters_frame, text="To Date:")
+        self.date_to_label.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+        
+        self.date_to_entry = ctk.CTkEntry(self.filters_frame, placeholder_text="YYYY-MM-DD")
+        self.date_to_entry.grid(row=1, column=3, padx=5, pady=5, sticky="ew")
+        self.date_to_entry.bind("<KeyRelease>", self._on_filter_changed)
+        
+        # Row 3: File size range and sorting
+        self.size_label = ctk.CTkLabel(self.filters_frame, text="Size (MB):")
+        self.size_label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        
+        self.size_frame = ctk.CTkFrame(self.filters_frame, fg_color="transparent")
+        self.size_frame.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        self.size_frame.grid_columnconfigure(2, weight=1)
+        
+        self.size_min_entry = ctk.CTkEntry(self.size_frame, placeholder_text="Min", width=60)
+        self.size_min_entry.grid(row=0, column=0, padx=2)
+        self.size_min_entry.bind("<KeyRelease>", self._on_filter_changed)
+        
+        self.size_sep_label = ctk.CTkLabel(self.size_frame, text="-")
+        self.size_sep_label.grid(row=0, column=1, padx=2)
+        
+        self.size_max_entry = ctk.CTkEntry(self.size_frame, placeholder_text="Max", width=60)
+        self.size_max_entry.grid(row=0, column=2, padx=2, sticky="w")
+        self.size_max_entry.bind("<KeyRelease>", self._on_filter_changed)
+        
+        self.sort_label = ctk.CTkLabel(self.filters_frame, text="Sort by:")
+        self.sort_label.grid(row=2, column=2, padx=5, pady=5, sticky="w")
+        
+        self.sort_var = tk.StringVar(value="Date ↓")
+        self.sort_menu = ctk.CTkOptionMenu(
+            self.filters_frame,
+            values=["Date ↓", "Date ↑", "Name ↓", "Name ↑", "Size ↓", "Size ↑", "Type ↓", "Type ↑"],
+            variable=self.sort_var,
+            command=self._on_sort_changed
+        )
+        self.sort_menu.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
+        
+        # Row 4: Additional filters and clear button
+        self.triggers_var = tk.BooleanVar()
+        self.triggers_checkbox = ctk.CTkCheckBox(
+            self.filters_frame,
+            text="Has trigger words",
+            variable=self.triggers_var,
+            command=self._on_filter_changed
+        )
+        self.triggers_checkbox.grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        
+        self.clear_filters_button = ctk.CTkButton(
+            self.filters_frame,
+            text="Clear All Filters",
+            command=self.clear_filters,
+            fg_color="red",
+            hover_color="darkred",
+            width=120
+        )
+        self.clear_filters_button.grid(row=3, column=3, padx=5, pady=5, sticky="e")
+        
+        # Update filter options
+        self._update_filter_options()
 
     def browse_txt_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
@@ -383,20 +518,27 @@ class App(ctk.CTk):
         task_frame = ctk.CTkFrame(self.queue_frame)
         task_frame.grid(row=row, column=0, padx=5, pady=5, sticky="ew")
         task_frame.grid_columnconfigure(1, weight=1)
+        
+        # URL display
         url_display = (url[:50] + '...') if len(url) > 53 else url
         task_label = ctk.CTkLabel(task_frame, text=f"URL: {url_display}", anchor="w")
         task_label.grid(row=0, column=0, padx=5, pady=2, sticky="w")
-        progress_bar = ctk.CTkProgressBar(task_frame, orientation="horizontal")
-        progress_bar.set(0)
-        progress_bar.grid(row=1, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
-        status_label = ctk.CTkLabel(task_frame, text="Status: Pending", anchor="w")
-        status_label.grid(row=2, column=0, padx=5, pady=2, sticky="w")
+        
+        # Enhanced progress widget
+        enhanced_progress = EnhancedProgressWidget(task_frame, task_id)
+        enhanced_progress.grid(row=1, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
+        
+        # Create progress tracker
+        tracker = progress_manager.create_tracker(task_id)
+        tracker.set_phase(ProgressPhase.INITIALIZING)
         # Store references to update later
         self.download_tasks[task_id] = {
             'frame': task_frame,
             'label': task_label,
-            'progress_bar': progress_bar,
-            'status_label': status_label,
+            'progress_bar': enhanced_progress.progress_bar,  # For backward compatibility
+            'enhanced_progress': enhanced_progress,
+            'tracker': tracker,
+            'status_label': None,  # Will be set below for compatibility
             'url': url, # Store original URL for full display if needed
             'stop_event': threading.Event(), # Per-task stop event
             'pause_event': threading.Event(), # Per-task pause event
@@ -438,7 +580,18 @@ class App(ctk.CTk):
         if task_id in self.download_tasks:
             task = self.download_tasks[task_id]
             task['stop_event'].set()
-            task['status_label'].configure(text="Status: Cancelling...", text_color="orange")
+
+            # Update enhanced progress tracker
+            if 'tracker' in task:
+                task['tracker'].cancel()
+                stats = task['tracker']._get_stats_copy()
+                if 'enhanced_progress' in task:
+                    task['enhanced_progress'].update_from_tracker(stats)
+
+            # Clean up background thread if it exists
+            if task_id in self.background_threads:
+                del self.background_threads[task_id]
+
             if task['cancel_button']:
                 task['cancel_button'].configure(state="disabled", text="Cancelled")
             if task['pause_button']:
@@ -450,17 +603,32 @@ class App(ctk.CTk):
         if task_id in self.download_tasks:
             task = self.download_tasks[task_id]
             task['pause_event'].set() # Set the event to signal pause
-            task['status_label'].configure(text="Status: Paused", text_color="blue")
+            
+            # Update enhanced progress tracker
+            if 'tracker' in task:
+                task['tracker'].pause()
+                stats = task['tracker']._get_stats_copy()
+                if 'enhanced_progress' in task:
+                    task['enhanced_progress'].update_from_tracker(stats)
+            
             if task['pause_button']:
                 task['pause_button'].configure(state="disabled")
             if task['resume_button']:
                 task['resume_button'].configure(state="normal")
             self.log_message(f"Pause requested for task: {task['url']}")
+            
     def resume_download(self, task_id):
         if task_id in self.download_tasks:
             task = self.download_tasks[task_id]
             task['pause_event'].clear() # Clear the event to signal resume
-            task['status_label'].configure(text="Status: Resuming...", text_color="green")
+            
+            # Update enhanced progress tracker
+            if 'tracker' in task:
+                task['tracker'].resume()
+                stats = task['tracker']._get_stats_copy()
+                if 'enhanced_progress' in task:
+                    task['enhanced_progress'].update_from_tracker(stats)
+            
             if task['pause_button']:
                 task['pause_button'].configure(state="normal")
             if task['resume_button']:
@@ -470,12 +638,21 @@ class App(ctk.CTk):
     def _cleanup_task_ui(self, task_id):
         # Ensure cleanup is called on the main thread to avoid race conditions
         self.after(0, lambda: self.__cleanup_task_ui_internal(task_id))
-    
+
     def __cleanup_task_ui_internal(self, task_id):
         if task_id in self.download_tasks:
             try:
+                # Clean up enhanced progress tracker
+                if 'tracker' in self.download_tasks[task_id]:
+                    progress_manager.remove_tracker(task_id)
+
                 self.download_tasks[task_id]['frame'].destroy()  # Destroy UI frame
                 del self.download_tasks[task_id]  # Remove from tracking
+
+                # Clean up background thread if it exists
+                if task_id in self.background_threads:
+                    del self.background_threads[task_id]
+
                 self._update_queue_ui_order()  # Re-grid remaining tasks
                 print(f"Cleaned up task UI for: {task_id}")  # Debug logging
             except Exception as e:
@@ -543,47 +720,66 @@ class App(ctk.CTk):
         self.queue_frame.update_idletasks() # Force update layout
     def _watch_completion(self, processing_thread):
         processing_thread.join()  # Wait for all URLs to be added to the queue
-        
+
         # Track completion more robustly
         tasks_processed = 0
         total_tasks_expected = 0
-        
+
         # Count total tasks that were added
         with self._queue_lock:
             total_tasks_expected = len(self._download_queue_list)
-        
+
         # Wait for all tasks to be processed
         while True:
             with self._queue_lock:
                 current_queue_size = len(self._download_queue_list)
-                
+
             # Calculate tasks processed
             tasks_processed = total_tasks_expected - current_queue_size
-            
+
             # Check if queue is empty (all tasks have been taken for processing)
             queue_empty = (current_queue_size == 0)
-            
+
             # Check if queue processor is still alive and working
             queue_processor_running = (hasattr(self, 'queue_processor_thread') and
-                                     self.queue_processor_thread.is_alive())
-            
+                                      self.queue_processor_thread.is_alive())
+
             # Completion condition: queue is empty AND either no processor running OR all tasks processed
             if queue_empty and (not queue_processor_running or len(self.download_tasks) == 0):
                 break
-                
+
             # Failsafe: if we have processed expected tasks and queue is empty, complete
             if queue_empty and tasks_processed >= total_tasks_expected:
                 break
-                
+
             time.sleep(0.3)  # Reduced sleep time for more responsive completion detection
-        
+
+        # Wait for all background threads to complete (HTML generation, history updates, etc.)
+        self.log_message("Waiting for background tasks to complete...")
+        while self.background_threads:
+            # Remove completed threads
+            completed_tasks = []
+            for task_id, bg_thread in self.background_threads.items():
+                if not bg_thread.is_alive():
+                    completed_tasks.append(task_id)
+
+            # Clean up completed threads
+            for task_id in completed_tasks:
+                del self.background_threads[task_id]
+
+            # If there are still active background threads, wait
+            if self.background_threads:
+                time.sleep(0.5)
+            else:
+                break
+
         # Wait a bit more to ensure all cleanup operations complete
         time.sleep(1.0)
-        
+
         if not self.stop_event.is_set():  # Only show completion if not shutting down
             self.after(0, lambda: self.log_message("\nAll downloads finished."))
             self.after(0, lambda: messagebox.showinfo("Download Complete", "All requested models have been processed."))
-            
+
             # Reset main UI elements
             self.after(0, lambda: self.download_button.configure(state="normal", text="Start Download"))
             self.after(0, lambda: self.progress_label.configure(text="Progress: N/A"))
@@ -655,14 +851,18 @@ class App(ctk.CTk):
                             pass  # Skip this update if queue is full (prevents memory buildup)
                     
                     self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Downloading..."))
-                    download_error = download_civitai_model(model_info, download_path, api_key, progress_callback=task_progress_callback, stop_event=task_stop_event, pause_event=self.download_tasks[task_id]['pause_event'])
-                    
+                    download_error, bg_thread = download_civitai_model(model_info, download_path, api_key, progress_callback=task_progress_callback, stop_event=task_stop_event, pause_event=self.download_tasks[task_id]['pause_event'])
+
                     if download_error:
                         self.after_idle(lambda id=task_id, err=download_error: self._safe_update_status(id, f"Status: Failed - {err}", "red"))
                         self.log_message(f"Download failed for {url}: {download_error}")
                         self.after_idle(lambda u=url, err=download_error: messagebox.showerror("Download Error", f"Download failed for {u}\nError: {err}"))
                         self._cleanup_task_ui(task_id)
                     else:
+                        # Store background thread for completion tracking
+                        if bg_thread:
+                            self.background_threads[task_id] = bg_thread
+
                         self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Complete", "green"))
                         self.log_message(f"Download complete for {url}")
                         self._cleanup_task_ui(task_id)
@@ -711,6 +911,10 @@ class App(ctk.CTk):
                     task_data['pause_button'].configure(state="disabled")
                 if task_data.get('resume_button'):
                     task_data['resume_button'].configure(state="disabled")
+
+            # Clear background threads tracking
+            self.background_threads.clear()
+
             self.log_message("Waiting for threads to finish...")
             
             # Wait for the progress processor thread to finish
@@ -734,7 +938,10 @@ class App(ctk.CTk):
     def clear_gui(self):
         self.url_entry.delete("1.0", ctk.END)
         # Only clear the URL entry as requested
-        
+
+        # Clear background threads tracking
+        self.background_threads.clear()
+
         self.log_message("URL input cleared.")
         # Do not reset other fields or download queue display
         # As per the new requirement, "Clear GUI" only clears the current URLs.
@@ -742,23 +949,21 @@ class App(ctk.CTk):
     # History management methods
     def refresh_history(self):
         """Refresh the history display."""
+        # Update filter options first
+        self._update_filter_options()
+        
         # Clear existing history items
         for widget in self.history_frame.winfo_children():
             widget.destroy()
         
-        # Get all downloads
-        downloads = self.history_manager.get_all_downloads()
+        # Clean up thumbnail cache periodically
+        try:
+            thumbnail_manager.cleanup_cache()
+        except Exception as e:
+            print(f"Error during thumbnail cache cleanup: {e}")
         
-        # Update statistics
-        stats = self.history_manager.get_stats()
-        total_size_mb = stats['total_size'] / (1024 * 1024)
-        self.stats_label.configure(
-            text=f"Total: {stats['total_downloads']} models, {total_size_mb:.1f} MB"
-        )
-        
-        # Display downloads
-        for i, download in enumerate(downloads):
-            self._create_history_item(download, i)
+        # Use the enhanced search to display all downloads with current filters
+        self._perform_filtered_search()
     
     def _create_history_item(self, download, row):
         """Create a GUI item for a download history entry."""
@@ -846,29 +1051,9 @@ class App(ctk.CTk):
         delete_btn.grid(row=0, column=2, padx=2)
     
     def search_history(self):
-        """Search through download history."""
-        query = self.search_entry.get().strip()
-        
-        # Clear existing history items
-        for widget in self.history_frame.winfo_children():
-            widget.destroy()
-        
-        if query:
-            # Search for matches
-            downloads = self.history_manager.search_downloads(query)
-            self.stats_label.configure(text=f"Found {len(downloads)} matches")
-        else:
-            # Show all downloads
-            downloads = self.history_manager.get_all_downloads()
-            stats = self.history_manager.get_stats()
-            total_size_mb = stats['total_size'] / (1024 * 1024)
-            self.stats_label.configure(
-                text=f"Total: {stats['total_downloads']} models, {total_size_mb:.1f} MB"
-            )
-        
-        # Display results
-        for i, download in enumerate(downloads):
-            self._create_history_item(download, i)
+        """Search through download history (legacy method - now redirects to enhanced search)."""
+        # Use the new enhanced search method
+        self._perform_filtered_search()
     
     def _on_search_changed(self, event=None):
         """Handle search entry changes with debouncing."""
@@ -876,8 +1061,380 @@ class App(ctk.CTk):
         if hasattr(self, '_search_after_id'):
             self.after_cancel(self._search_after_id)
         
-        # Schedule a new search after 500ms of inactivity
-        self._search_after_id = self.after(500, self.search_history)
+        # Schedule a new search after 300ms of inactivity (reduced for faster response)
+        self._search_after_id = self.after(300, self._perform_filtered_search)
+    
+    def _on_filter_changed(self, *args):
+        """Handle filter changes with debouncing."""
+        # Cancel any pending search
+        if hasattr(self, '_search_after_id'):
+            self.after_cancel(self._search_after_id)
+        
+        # Schedule a new search after 300ms of inactivity
+        self._search_after_id = self.after(300, self._perform_filtered_search)
+    
+    def _on_sort_changed(self, value):
+        """Handle sort order changes."""
+        # Parse sort value (e.g., "Date ↓" -> "download_date", "desc")
+        sort_mapping = {
+            "Date ↓": ("download_date", "desc"),
+            "Date ↑": ("download_date", "asc"),
+            "Name ↓": ("model_name", "desc"),
+            "Name ↑": ("model_name", "asc"),
+            "Size ↓": ("file_size", "desc"),
+            "Size ↑": ("file_size", "asc"),
+            "Type ↓": ("model_type", "desc"),
+            "Type ↑": ("model_type", "asc")
+        }
+        
+        if value in sort_mapping:
+            self.current_sort_by, self.current_sort_order = sort_mapping[value]
+        
+        # Trigger immediate search
+        self._perform_filtered_search()
+    
+    def _perform_filtered_search(self):
+        """Perform search with current filters and sorting."""
+        query = self.search_entry.get().strip()
+        
+        # Build filter criteria
+        filters = {}
+        
+        # Model type filter
+        model_type = self.model_type_var.get()
+        if model_type and model_type != "All":
+            filters['model_type'] = model_type
+        
+        # Base model filter
+        base_model = self.base_model_var.get()
+        if base_model and base_model != "All":
+            filters['base_model'] = base_model
+        
+        # Date range filters
+        date_from = self.date_from_entry.get().strip()
+        if date_from:
+            filters['date_from'] = date_from
+        
+        date_to = self.date_to_entry.get().strip()
+        if date_to:
+            filters['date_to'] = date_to
+        
+        # File size range filters
+        size_min = self.size_min_entry.get().strip()
+        if size_min:
+            try:
+                filters['size_min'] = float(size_min) * 1024 * 1024  # Convert MB to bytes
+            except ValueError:
+                pass  # Invalid input, ignore
+        
+        size_max = self.size_max_entry.get().strip()
+        if size_max:
+            try:
+                filters['size_max'] = float(size_max) * 1024 * 1024  # Convert MB to bytes
+            except ValueError:
+                pass  # Invalid input, ignore
+        
+        # Trigger words filter
+        if self.triggers_var.get():
+            filters['has_trigger_words'] = True
+        
+        # Store current filters
+        self.current_filters = filters
+        
+        # Clear existing history items
+        for widget in self.history_frame.winfo_children():
+            widget.destroy()
+        
+        # Perform search with filters
+        downloads = self.history_manager.search_downloads(
+            query=query,
+            filters=filters,
+            sort_by=self.current_sort_by,
+            sort_order=self.current_sort_order
+        )
+        
+        # Update statistics
+        if query or filters:
+            self.stats_label.configure(text=f"Found {len(downloads)} matches")
+        else:
+            stats = self.history_manager.get_stats()
+            total_size_mb = stats['total_size'] / (1024 * 1024)
+            self.stats_label.configure(
+                text=f"Total: {stats['total_downloads']} models, {total_size_mb:.1f} MB"
+            )
+        
+        # Display results with highlighting
+        for i, download in enumerate(downloads):
+            self._create_history_item_with_highlight(download, i, query)
+        
+        # Preload thumbnails for visible items in background
+        model_dirs = [download.get('download_path', '') for download in downloads if download.get('download_path')]
+        if model_dirs:
+            thumbnail_manager.preload_thumbnails(model_dirs, 'small')
+        
+        # Update active filters display
+        self._update_active_filters_display()
+    
+    def _create_history_item_with_highlight(self, download, row, search_query=""):
+        """Create a GUI item for a download history entry with search highlighting."""
+        # Main frame for the history item
+        item_frame = ctk.CTkFrame(self.history_frame)
+        item_frame.grid(row=row, column=0, padx=5, pady=5, sticky="ew")
+        item_frame.grid_columnconfigure(2, weight=1)  # Changed to accommodate thumbnail
+        
+        # Thumbnail widget
+        thumbnail_widget = ThumbnailWidget(item_frame, size=(64, 64))
+        thumbnail_widget.grid(row=0, column=0, rowspan=2, padx=5, pady=5, sticky="nw")
+        
+        # Load thumbnail for this model
+        model_dir = download.get('download_path', '')
+        thumbnail_path = thumbnail_manager.get_model_thumbnail(model_dir, 'small')
+        fallback_path = thumbnail_manager.get_fallback_thumbnail('small')
+        thumbnail_widget.set_thumbnail(thumbnail_path, fallback_path)
+        
+        # Set click callback to view full image
+        def on_thumbnail_click(path):
+            if path and os.path.exists(path):
+                try:
+                    import webbrowser
+                    webbrowser.open(f"file://{os.path.abspath(path)}")
+                except Exception as e:
+                    print(f"Error opening image: {e}")
+        
+        thumbnail_widget.set_click_callback(on_thumbnail_click)
+        
+        # Model info frame (adjusted for thumbnail)
+        info_frame = ctk.CTkFrame(item_frame)
+        info_frame.grid(row=0, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+        info_frame.grid_columnconfigure(1, weight=1)
+        
+        # Model name and version with highlighting
+        model_name = download.get('model_name', 'Unknown')
+        version_name = download.get('version_name', 'Unknown')
+        title_text = f"{model_name} - {version_name}"
+        if len(title_text) > 60:
+            title_text = title_text[:57] + "..."
+        
+        # Determine if this item matches the search query
+        text_color = "yellow" if search_query and search_query.lower() in title_text.lower() else None
+        
+        title_label = ctk.CTkLabel(
+            info_frame,
+            text=title_text,
+            font=ctk.CTkFont(weight="bold"),
+            text_color=text_color
+        )
+        title_label.grid(row=0, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+        
+        # Model details
+        model_type = download.get('model_type', 'Unknown')
+        base_model = download.get('base_model', 'Unknown')
+        file_size_mb = download.get('file_size', 0) / (1024 * 1024)
+        download_date = download.get('download_date', 'Unknown')
+        
+        # Format date
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(download_date.replace('Z', '+00:00'))
+            formatted_date = dt.strftime('%Y-%m-%d %H:%M')
+        except:
+            formatted_date = download_date[:19] if len(download_date) > 19 else download_date
+        
+        details_text = f"Type: {model_type} | Base: {base_model} | Size: {file_size_mb:.1f} MB | Downloaded: {formatted_date}"
+        
+        # Highlight details if they match search
+        details_color = "yellow" if search_query and (
+            search_query.lower() in model_type.lower() or
+            search_query.lower() in base_model.lower()
+        ) else None
+        
+        details_label = ctk.CTkLabel(
+            info_frame,
+            text=details_text,
+            font=ctk.CTkFont(size=10),
+            text_color=details_color
+        )
+        details_label.grid(row=1, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+        
+        # Trigger words with highlighting
+        trigger_words = download.get('trigger_words', [])
+        if trigger_words:
+            trigger_text = "Triggers: " + ", ".join(trigger_words[:5])  # Show first 5 triggers
+            if len(trigger_words) > 5:
+                trigger_text += f" (+{len(trigger_words) - 5} more)"
+            
+            # Check if any trigger words match search
+            trigger_color = "yellow" if search_query and any(
+                search_query.lower() in trigger.lower() for trigger in trigger_words
+            ) else "gray"
+            
+            trigger_label = ctk.CTkLabel(
+                info_frame,
+                text=trigger_text,
+                font=ctk.CTkFont(size=9),
+                text_color=trigger_color
+            )
+            trigger_label.grid(row=2, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+        
+        # Buttons frame (adjusted for thumbnail)
+        buttons_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
+        buttons_frame.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+        
+        # Open folder button
+        open_btn = ctk.CTkButton(
+            buttons_frame,
+            text="Open Folder",
+            command=lambda d=download: self.open_model_folder(d),
+            width=80,
+            height=25
+        )
+        open_btn.grid(row=0, column=0, padx=2)
+        
+        # View report button
+        report_btn = ctk.CTkButton(
+            buttons_frame,
+            text="View Report",
+            command=lambda d=download: self.view_model_report(d),
+            width=80,
+            height=25
+        )
+        report_btn.grid(row=0, column=1, padx=2)
+        
+        # Delete button
+        delete_btn = ctk.CTkButton(
+            buttons_frame,
+            text="Delete",
+            command=lambda d=download: self.delete_model_entry(d),
+            width=60,
+            height=25,
+            fg_color="red",
+            hover_color="darkred"
+        )
+        delete_btn.grid(row=0, column=2, padx=2)
+    
+    def _update_active_filters_display(self):
+        """Update the display of active filters."""
+        # Clear existing filter chips
+        for widget in self.active_filters_frame.winfo_children():
+            widget.destroy()
+        
+        active_count = 0
+        
+        # Search query chip
+        query = self.search_entry.get().strip()
+        if query:
+            chip = ctk.CTkLabel(
+                self.active_filters_frame,
+                text=f"Search: '{query}'",
+                fg_color="blue",
+                corner_radius=10,
+                padx=8,
+                pady=2
+            )
+            chip.grid(row=0, column=active_count, padx=2, pady=2)
+            active_count += 1
+        
+        # Filter chips
+        filter_labels = {
+            'model_type': 'Type',
+            'base_model': 'Base',
+            'date_from': 'From',
+            'date_to': 'To',
+            'size_min': 'Min Size',
+            'size_max': 'Max Size',
+            'has_trigger_words': 'Has Triggers'
+        }
+        
+        for filter_key, label in filter_labels.items():
+            if filter_key in self.current_filters:
+                value = self.current_filters[filter_key]
+                if filter_key in ['size_min', 'size_max']:
+                    # Convert bytes back to MB for display
+                    value = f"{value / (1024 * 1024):.1f} MB"
+                elif filter_key == 'has_trigger_words':
+                    value = "Yes"
+                
+                chip = ctk.CTkLabel(
+                    self.active_filters_frame,
+                    text=f"{label}: {value}",
+                    fg_color="green",
+                    corner_radius=10,
+                    padx=8,
+                    pady=2
+                )
+                chip.grid(row=0, column=active_count, padx=2, pady=2)
+                active_count += 1
+        
+        # Sort chip
+        if hasattr(self, 'sort_var'):
+            sort_text = self.sort_var.get()
+            if sort_text != "Date ↓":  # Only show if not default
+                chip = ctk.CTkLabel(
+                    self.active_filters_frame,
+                    text=f"Sort: {sort_text}",
+                    fg_color="purple",
+                    corner_radius=10,
+                    padx=8,
+                    pady=2
+                )
+                chip.grid(row=0, column=active_count, padx=2, pady=2)
+                active_count += 1
+        
+        # Show "No filters" if no active filters
+        if active_count == 0:
+            no_filters_label = ctk.CTkLabel(
+                self.active_filters_frame,
+                text="No active filters",
+                text_color="gray"
+            )
+            no_filters_label.grid(row=0, column=0, padx=5, pady=2)
+    
+    def _update_filter_options(self):
+        """Update the dropdown options based on available data."""
+        try:
+            options = self.history_manager.get_filter_options()
+            
+            # Update model type dropdown
+            model_types = ["All"] + options.get('model_types', [])
+            self.model_type_menu.configure(values=model_types)
+            
+            # Update base model dropdown
+            base_models = ["All"] + options.get('base_models', [])
+            self.base_model_menu.configure(values=base_models)
+            
+        except Exception as e:
+            print(f"Error updating filter options: {e}")
+    
+    def clear_filters(self):
+        """Clear all filters and reset search."""
+        # Clear search entry
+        self.search_entry.delete(0, ctk.END)
+        
+        # Reset dropdown filters
+        self.model_type_var.set("All")
+        self.base_model_var.set("All")
+        
+        # Clear date filters
+        self.date_from_entry.delete(0, ctk.END)
+        self.date_to_entry.delete(0, ctk.END)
+        
+        # Clear size filters
+        self.size_min_entry.delete(0, ctk.END)
+        self.size_max_entry.delete(0, ctk.END)
+        
+        # Reset checkbox
+        self.triggers_var.set(False)
+        
+        # Reset sort to default
+        self.sort_var.set("Date ↓")
+        self.current_sort_by = "download_date"
+        self.current_sort_order = "desc"
+        
+        # Clear current filters
+        self.current_filters = {}
+        
+        # Refresh history display
+        self.refresh_history()
     
     def scan_downloads(self):
         """Scan the download directory to populate history."""

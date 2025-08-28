@@ -1941,6 +1941,130 @@
       "trigger_words": [],
       "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\Checkpoint\\Ratatoskr WAN 2.1 _ WAN 2.2 Hybrid I2V (Animal, Creature and Furry)\\WAN  2.2 Hybrid v1.0 WIP\\metadata.json",
       "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\Checkpoint\\Ratatoskr WAN 2.1 _ WAN 2.2 Hybrid I2V (Animal, Creature and Furry)\\WAN  2.2 Hybrid v1.0 WIP\\report.html"
+    },
+    {
+      "id": "f6959daa-5a69-42f6-992d-495e3df8823a",
+      "model_id": 1585619,
+      "version_id": 2110439,
+      "model_name": "POV Missionary XL",
+      "version_name": "Wan2.2 I2V high noise",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\POV Missionary XL\\Wan2.2 I2V high noise",
+      "download_date": "2025-08-28T14:01:53.468064",
+      "file_size": 306809301.0,
+      "trigger_words": [
+        "POV missionary,",
+        "vaginal penetration,",
+        "anal penetration,",
+        "spreading legs,",
+        "penis,",
+        "legs up,"
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\POV Missionary XL\\Wan2.2 I2V high noise\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\POV Missionary XL\\Wan2.2 I2V high noise\\report.html"
+    },
+    {
+      "id": "ac04a14b-3762-4a82-ba5f-3e2d07958207",
+      "model_id": 1848230,
+      "version_id": 2091602,
+      "model_name": "Delustious",
+      "version_name": "v1.0",
+      "model_type": "Checkpoint",
+      "base_model": "Illustrious",
+      "download_path": "Q:\\Models.v2\\Illustrious\\Checkpoint\\Delustious\\v1.0",
+      "download_date": "2025-08-28T14:05:45.271634",
+      "file_size": 6938040682.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Illustrious\\Checkpoint\\Delustious\\v1.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Illustrious\\Checkpoint\\Delustious\\v1.0\\report.html"
+    },
+    {
+      "id": "00735981-fa8f-4834-a62e-75031ec5ee2e",
+      "model_id": 1906438,
+      "version_id": 2157825,
+      "model_name": "The camera zooms upward",
+      "version_name": "HIGHv1.0",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\The camera zooms upward\\HIGHv1.0",
+      "download_date": "2025-08-28T14:13:47.402554",
+      "file_size": 306847504.0,
+      "trigger_words": [
+        "KZ"
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\The camera zooms upward\\HIGHv1.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\The camera zooms upward\\HIGHv1.0\\report.html"
+    },
+    {
+      "id": "f1c7c866-5ba9-4632-b685-2ec888318d55",
+      "model_id": 1905250,
+      "version_id": 2156513,
+      "model_name": "wan2.2-i2v-high-Screen Flood（屏幕淹水）",
+      "version_name": "high",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\wan2.2-i2v-high-Screen Flood（屏幕淹水）\\high",
+      "download_date": "2025-08-28T14:13:57.430192",
+      "file_size": 306807976.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\wan2.2-i2v-high-Screen Flood（屏幕淹水）\\high\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\wan2.2-i2v-high-Screen Flood（屏幕淹水）\\high\\report.html"
+    },
+    {
+      "id": "878d6b7c-fb82-4643-be87-1d9fb56d2826",
+      "model_id": 1428098,
+      "version_id": 2156392,
+      "model_name": "WAN C0WG1RL + REV3RSE C0WG1RL -- T2V & I2V LoRa",
+      "version_name": "wan2.2 - I2V-14B-HIGH",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\WAN C0WG1RL + REV3RSE C0WG1RL -- T2V & I2V LoRa\\wan2.2 - I2V-14B-HIGH",
+      "download_date": "2025-08-28T14:14:32.393224",
+      "file_size": 613516752.0,
+      "trigger_words": [
+        "r3v3rs3_c0wg1rl",
+        "c0wg1rl",
+        "straddling  him in the reverse cowgirl position"
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\WAN C0WG1RL + REV3RSE C0WG1RL -- T2V & I2V LoRa\\wan2.2 - I2V-14B-HIGH\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\WAN C0WG1RL + REV3RSE C0WG1RL -- T2V & I2V LoRa\\wan2.2 - I2V-14B-HIGH\\report.html"
+    },
+    {
+      "id": "23a91a38-10ed-4ede-94d5-296ab558b7f1",
+      "model_id": 1428098,
+      "version_id": 2156435,
+      "model_name": "WAN C0WG1RL + REV3RSE C0WG1RL -- T2V & I2V LoRa",
+      "version_name": "wan2.2 - I2V-14B-LOW",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\WAN C0WG1RL + REV3RSE C0WG1RL -- T2V & I2V LoRa\\wan2.2 - I2V-14B-LOW",
+      "download_date": "2025-08-28T14:15:01.592139",
+      "file_size": 613516752.0,
+      "trigger_words": [
+        "r3v3rs3_c0wg1rl",
+        "c0wg1rl",
+        "straddling  him in the reverse cowgirl position"
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\WAN C0WG1RL + REV3RSE C0WG1RL -- T2V & I2V LoRa\\wan2.2 - I2V-14B-LOW\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\WAN C0WG1RL + REV3RSE C0WG1RL -- T2V & I2V LoRa\\wan2.2 - I2V-14B-LOW\\report.html"
+    },
+    {
+      "id": "58c3ce60-6dea-464b-866a-0a8a35e9cdbc",
+      "model_id": 1905168,
+      "version_id": 2156421,
+      "model_name": "Cumshot [WAN 2.2]",
+      "version_name": "v1.0",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\Cumshot [WAN 2.2]\\v1.0",
+      "download_date": "2025-08-28T14:15:28.743180",
+      "file_size": 565964097.0,
+      "trigger_words": [
+        "A man cums on her"
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Cumshot [WAN 2.2]\\v1.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Cumshot [WAN 2.2]\\v1.0\\report.html"
     }
   ]
 }

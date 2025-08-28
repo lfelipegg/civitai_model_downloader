@@ -356,7 +356,7 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
             print(f"HTML report generated for {model_name} v{model_version_name}")
         except Exception as e:
             print(f"Warning: Failed to generate HTML report: {e}")
-        
+
         try:
             # Add to download history
             from src.history_manager import HistoryManager
@@ -365,12 +365,12 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
             print(f"Added {model_name} v{model_version_name} to download history")
         except Exception as e:
             print(f"Warning: Failed to add to download history: {e}")
-    
+
     # Run background tasks in separate thread to avoid blocking
-    bg_thread = threading.Thread(target=background_tasks, daemon=True)
+    bg_thread = threading.Thread(target=background_tasks, daemon=True, name=f"bg_{model_name}_{model_version_name}")
     bg_thread.start()
-    
-    return None # Indicate success
+
+    return None, bg_thread # Return success and background thread for tracking
 
 def sanitize_filename(name):
     """Sanitizes a string to be used as a filename or directory name."""
