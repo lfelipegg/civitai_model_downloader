@@ -8,6 +8,7 @@ import platform
 import subprocess
 import time
 import urllib.parse # Added for URL validation
+import queue # For thread-safe progress updates
 
 # Assuming civitai_downloader functions are available
 from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded
@@ -26,6 +27,10 @@ class App(ctk.CTk):
         self.download_tasks = {} # To hold references to download frames and progress bars
         self.queue_row_counter = 0 # To manage grid placement in the queue_frame
         self.stop_event = threading.Event() # Event to signal threads to stop
+        
+        # Progress update queue for thread-safe UI updates
+        self.progress_queue = queue.Queue()
+        self._start_progress_processor()
 
         # Initialize history manager
         self.history_manager = HistoryManager()
@@ -49,6 +54,65 @@ class App(ctk.CTk):
         
         # Setup history tab
         self._setup_history_tab()
+    
+    def _start_progress_processor(self):
+        """Start the progress processor to handle UI updates efficiently"""
+        def process_progress_updates():
+            try:
+                while not self.stop_event.is_set():
+                    try:
+                        # Get progress update from queue with timeout
+                        update_data = self.progress_queue.get(timeout=0.1)
+                        if update_data is None:  # Poison pill to stop
+                            break
+                        
+                        # Process the update on main thread
+                        self.after_idle(lambda data=update_data: self._apply_progress_update(data))
+                        self.progress_queue.task_done()
+                    except queue.Empty:
+                        continue
+            except Exception as e:
+                print(f"Progress processor error: {e}")
+        
+        # Start progress processor thread
+        self.progress_thread = threading.Thread(target=process_progress_updates, daemon=True)
+        self.progress_thread.start()
+    
+    def _apply_progress_update(self, update_data):
+        """Apply progress update to UI (called on main thread)"""
+        try:
+            update_type = update_data.get('type')
+            task_id = update_data.get('task_id')
+            
+            if update_type == 'progress' and task_id in self.download_tasks:
+                task = self.download_tasks[task_id]
+                bytes_downloaded = update_data.get('bytes_downloaded', 0)
+                total_size = update_data.get('total_size', 0)
+                speed = update_data.get('speed', 0)
+                
+                if task['pause_event'].is_set():  # Don't update progress if paused
+                    return
+                
+                if total_size > 0:
+                    progress_percent = (bytes_downloaded / total_size) * 100
+                    task['progress_bar'].set(progress_percent / 100)
+                    task['status_label'].configure(text=f"Status: Downloading... {bytes_downloaded / (1024*1024):.2f} MB / {total_size / (1024*1024):.2f} MB ({progress_percent:.2f}%)")
+                else:
+                    task['progress_bar'].set(0)
+                    task['status_label'].configure(text="Status: Downloading... (Unknown size)")
+                
+                # Update main speed/remaining labels
+                self.speed_label.configure(text=f"Speed: {speed / 1024:.2f} KB/s")
+                if speed > 0 and total_size > 0:
+                    remaining_bytes = total_size - bytes_downloaded
+                    remaining_time_sec = remaining_bytes / speed
+                    mins, secs = divmod(remaining_time_sec, 60)
+                    self.remaining_label.configure(text=f"Remaining: {int(mins)}m {int(secs)}s")
+                else:
+                    self.remaining_label.configure(text="Remaining: Calculating...")
+                    
+        except Exception as e:
+            print(f"Error applying progress update: {e}")
 
     def _setup_download_tab(self):
         # Configure grid layout for download tab
@@ -406,11 +470,30 @@ class App(ctk.CTk):
     def _cleanup_task_ui(self, task_id):
         # Ensure cleanup is called on the main thread to avoid race conditions
         self.after(0, lambda: self.__cleanup_task_ui_internal(task_id))
+    
     def __cleanup_task_ui_internal(self, task_id):
         if task_id in self.download_tasks:
-            self.download_tasks[task_id]['frame'].destroy() # Destroy UI frame
-            del self.download_tasks[task_id] # Remove from tracking
-            self._update_queue_ui_order() # Re-grid remaining tasks
+            try:
+                self.download_tasks[task_id]['frame'].destroy()  # Destroy UI frame
+                del self.download_tasks[task_id]  # Remove from tracking
+                self._update_queue_ui_order()  # Re-grid remaining tasks
+                print(f"Cleaned up task UI for: {task_id}")  # Debug logging
+            except Exception as e:
+                print(f"Error during task cleanup for {task_id}: {e}")
+
+    def _process_download_queue(self):
+        while not self.stop_event.is_set():
+            task = None
+            with self._queue_lock:
+                while not self._download_queue_list and not self.stop_event.is_set():
+                    self._queue_condition.wait(timeout=0.5) # Wait for new tasks or shutdown signal
+                
+                if self.stop_event.is_set(): # Check after waiting
+                    break
+                
+                if self._download_queue_list:
+                    task = self._download_queue_list.pop(0) # Get the first task
+                    print(f"Processing task from queue. Remaining: {len(self._download_queue_list)}")  # Debug logging
  
     def move_task_up(self, task_id):
         with self._queue_lock:
@@ -459,17 +542,45 @@ class App(ctk.CTk):
         # After re-gridding, ensure the scrollable frame updates its view
         self.queue_frame.update_idletasks() # Force update layout
     def _watch_completion(self, processing_thread):
-        processing_thread.join() # Wait for all URLs to be added to the queue
+        processing_thread.join()  # Wait for all URLs to be added to the queue
         
-        # Wait for the download queue to be empty
+        # Track completion more robustly
+        tasks_processed = 0
+        total_tasks_expected = 0
+        
+        # Count total tasks that were added
+        with self._queue_lock:
+            total_tasks_expected = len(self._download_queue_list)
+        
+        # Wait for all tasks to be processed
         while True:
             with self._queue_lock:
-                # Check if there are no pending tasks in the list and no active tasks being processed
-                # This assumes tasks are removed from download_tasks when they are truly done (Completed/Failed/Cancelled)
-                if not self._download_queue_list and not self.download_tasks:
-                    break
-            time.sleep(0.5) # Wait a bit before re-checking
-        if not self.stop_event.is_set(): # Only show completion if not shutting down
+                current_queue_size = len(self._download_queue_list)
+                
+            # Calculate tasks processed
+            tasks_processed = total_tasks_expected - current_queue_size
+            
+            # Check if queue is empty (all tasks have been taken for processing)
+            queue_empty = (current_queue_size == 0)
+            
+            # Check if queue processor is still alive and working
+            queue_processor_running = (hasattr(self, 'queue_processor_thread') and
+                                     self.queue_processor_thread.is_alive())
+            
+            # Completion condition: queue is empty AND either no processor running OR all tasks processed
+            if queue_empty and (not queue_processor_running or len(self.download_tasks) == 0):
+                break
+                
+            # Failsafe: if we have processed expected tasks and queue is empty, complete
+            if queue_empty and tasks_processed >= total_tasks_expected:
+                break
+                
+            time.sleep(0.3)  # Reduced sleep time for more responsive completion detection
+        
+        # Wait a bit more to ensure all cleanup operations complete
+        time.sleep(1.0)
+        
+        if not self.stop_event.is_set():  # Only show completion if not shutting down
             self.after(0, lambda: self.log_message("\nAll downloads finished."))
             self.after(0, lambda: messagebox.showinfo("Download Complete", "All requested models have been processed."))
             
@@ -505,82 +616,89 @@ class App(ctk.CTk):
                 
                 # Handle task cancelled before processing
                 if task_stop_event.is_set():
-                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Cancelled", text_color="red"))
+                    self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Cancelled", "red"))
                     self.log_message(f"Task {url} was cancelled before processing. Skipping.")
-                    self._cleanup_task_ui(task_id) # Call helper for cleanup
+                    self._cleanup_task_ui(task_id)
                     continue
                 try:
-                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Fetching Info..."))
+                    self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Fetching Info..."))
                     self.log_message(f"\nProcessing URL: {url}")
                     
                     model_info, error_message = get_model_info_from_url(url, api_key)
                     if error_message:
-                        self.after(0, lambda id=task_id, msg=error_message: self.download_tasks[id]['status_label'].configure(text=f"Status: Failed - {msg}", text_color="red"))
+                        self.after_idle(lambda id=task_id, msg=error_message: self._safe_update_status(id, f"Status: Failed - {msg}", "red"))
                         self.log_message(f"Error retrieving model info for {url}: {error_message}")
-                        messagebox.showerror("Download Error", f"Could not retrieve model information for URL: {url}\nError: {error_message}")
-                        self._cleanup_task_ui(task_id) # Call helper for cleanup
+                        self.after_idle(lambda msg=error_message, u=url: messagebox.showerror("Download Error", f"Could not retrieve model information for URL: {u}\nError: {msg}"))
+                        self._cleanup_task_ui(task_id)
                         continue
+                    
                     # Check if model is already downloaded
                     if is_model_downloaded(model_info, download_path):
-                        self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Already Downloaded"))
+                        self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Already Downloaded"))
                         self.log_message(f"Model {model_info['model']['name']} v{model_info['name']} already downloaded. Skipping.")
-                        self._cleanup_task_ui(task_id) # Call helper for cleanup
+                        self._cleanup_task_ui(task_id)
                         continue
-                    # Define a specific progress callback for this task
+                    
+                    # Define a specific progress callback for this task (queue-based, non-blocking)
                     def task_progress_callback(bytes_downloaded, total_size, speed):
-                        self.after(0, self._update_task_progress_ui, task_id, bytes_downloaded, total_size, speed)
-                    self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Downloading..."))
+                        # Put progress update in queue instead of direct UI update
+                        try:
+                            update_data = {
+                                'type': 'progress',
+                                'task_id': task_id,
+                                'bytes_downloaded': bytes_downloaded,
+                                'total_size': total_size,
+                                'speed': speed
+                            }
+                            self.progress_queue.put_nowait(update_data)
+                        except queue.Full:
+                            pass  # Skip this update if queue is full (prevents memory buildup)
+                    
+                    self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Downloading..."))
                     download_error = download_civitai_model(model_info, download_path, api_key, progress_callback=task_progress_callback, stop_event=task_stop_event, pause_event=self.download_tasks[task_id]['pause_event'])
                     
                     if download_error:
-                        self.after(0, lambda id=task_id, err=download_error: self.download_tasks[id]['status_label'].configure(text=f"Status: Failed - {err}", text_color="red"))
+                        self.after_idle(lambda id=task_id, err=download_error: self._safe_update_status(id, f"Status: Failed - {err}", "red"))
                         self.log_message(f"Download failed for {url}: {download_error}")
-                        messagebox.showerror("Download Error", f"Download failed for {url}\nError: {download_error}")
-                        self._cleanup_task_ui(task_id) # Call helper for cleanup
+                        self.after_idle(lambda u=url, err=download_error: messagebox.showerror("Download Error", f"Download failed for {u}\nError: {err}"))
+                        self._cleanup_task_ui(task_id)
                     else:
-                        self.after(0, lambda id=task_id: self.download_tasks[id]['status_label'].configure(text="Status: Complete", text_color="green"))
+                        self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Complete", "green"))
                         self.log_message(f"Download complete for {url}")
-                        self._cleanup_task_ui(task_id) # Call helper for cleanup
+                        self._cleanup_task_ui(task_id)
                     
                 except Exception as e:
                     self.log_message(f"An unexpected error occurred during queue processing: {e}")
                     if 'task_id' in locals() and task_id in self.download_tasks:
-                        self.after(0, lambda id=task_id, err=e: self.download_tasks[id]['status_label'].configure(text=f"Status: Unexpected Error - {err}", text_color="red"))
-                        self._cleanup_task_ui(task_id) # Call helper for cleanup
-                finally:
-                    # The cleanup is now handled explicitly in each branch (continue, if/else, except).
-                    # This finally block is no longer needed for cleanup.
-                    pass
+                        self.after_idle(lambda id=task_id, err=e: self._safe_update_status(id, f"Status: Unexpected Error - {err}", "red"))
+                        self._cleanup_task_ui(task_id)
         self.log_message("Download queue processing stopped.") # Log when the thread actually stops
     
-    def _update_task_progress_ui(self, task_id, bytes_downloaded, total_size, speed):
-        if task_id in self.download_tasks:
-            task = self.download_tasks[task_id]
-            if task['pause_event'].is_set(): # Don't update progress if paused
-                return
-            if total_size > 0:
-                progress_percent = (bytes_downloaded / total_size) * 100
-                task['progress_bar'].set(progress_percent / 100)
-                task['status_label'].configure(text=f"Status: Downloading... {bytes_downloaded / (1024*1024):.2f} MB / {total_size / (1024*1024):.2f} MB ({progress_percent:.2f}%)")
-            else:
-                task['progress_bar'].set(0) # Unknown size, reset progress
-                task['status_label'].configure(text="Status: Downloading... (Unknown size)")
-            
-            # Update main speed/remaining labels with current task's info for user feedback
-            # This can be made more sophisticated later to show overall progress
-            self.speed_label.configure(text=f"Speed: {speed / 1024:.2f} KB/s")
-            if speed > 0 and total_size > 0:
-                remaining_bytes = total_size - bytes_downloaded
-                remaining_time_sec = remaining_bytes / speed
-                mins, secs = divmod(remaining_time_sec, 60)
-                self.remaining_label.configure(text=f"Remaining: {int(mins)}m {int(secs)}s")
-            else:
-                self.remaining_label.configure(text="Remaining: Calculating...")
+    def _safe_update_status(self, task_id, status_text, text_color=None):
+        """Safely update task status with error handling"""
+        try:
+            if task_id in self.download_tasks:
+                if text_color:
+                    self.download_tasks[task_id]['status_label'].configure(text=status_text, text_color=text_color)
+                else:
+                    self.download_tasks[task_id]['status_label'].configure(text=status_text)
+        except Exception as e:
+            print(f"Error updating status for task {task_id}: {e}")
+    
+    # Note: _update_task_progress_ui method is now replaced by _apply_progress_update
+    # which is called via the progress queue system for better performance
  
     def _on_closing(self):
         if messagebox.askokcancel("Quit", "Do you want to quit? Ongoing downloads will be interrupted."):
             self.stop_event.set() # Signal main queue processing thread to stop
             self.log_message("Shutdown initiated. Signalling individual downloads to stop...")
+            
+            # Stop progress processor
+            try:
+                self.progress_queue.put_nowait(None)  # Poison pill to stop progress processor
+            except queue.Full:
+                pass
+            
             # Signal all individual download threads to stop and clear pause events
             for task_id, task_data in list(self.download_tasks.items()): # Iterate over a copy as dict might change
                 if 'stop_event' in task_data:
@@ -594,6 +712,12 @@ class App(ctk.CTk):
                 if task_data.get('resume_button'):
                     task_data['resume_button'].configure(state="disabled")
             self.log_message("Waiting for threads to finish...")
+            
+            # Wait for the progress processor thread to finish
+            if hasattr(self, 'progress_thread') and self.progress_thread.is_alive():
+                self.progress_thread.join(timeout=2)
+                if self.progress_thread.is_alive():
+                    self.log_message("Progress processor thread did not terminate gracefully.")
             
             # Wait for the queue processor thread to finish
             if hasattr(self, 'queue_processor_thread') and self.queue_processor_thread.is_alive():
