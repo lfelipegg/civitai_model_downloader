@@ -493,13 +493,51 @@ class App(ctk.CTk):
                 parsed_url = urllib.parse.urlparse(url)
                 if not all([parsed_url.scheme, parsed_url.netloc]):
                     self.log_message(f"Skipping invalid URL: {url}")
-                    # Add GUI element for the invalid task with a failed status
+                    # Pre-register task to avoid race with queue processor
                     task_id = f"task_{hash(url)}_{self.queue_row_counter}"
+                    if task_id not in self.download_tasks:
+                        # Minimal placeholder; UI will enrich this entry on main thread
+                        self.download_tasks[task_id] = {
+                            'url': url,
+                            'stop_event': threading.Event(),
+                            'pause_event': threading.Event(),
+                            'frame': None,
+                            'progress_bar': None,
+                            'enhanced_progress': None,
+                            'tracker': None,
+                            'status_label': None,
+                            'cancel_button': None,
+                            'pause_button': None,
+                            'resume_button': None,
+                        }
+                    # Add GUI element for the invalid task with a failed status
                     self.after(0, self._add_download_task_ui, task_id, url)
-                    self.after(0, lambda id=task_id, msg="Invalid URL format": self.download_tasks[id]['status_label'].configure(text=f"Status: Failed - {msg}", text_color="red"))
+                    # Attempt to set status once UI is ready; guard missing label
+                    def _mark_invalid(tid=task_id):
+                        try:
+                            if tid in self.download_tasks and self.download_tasks[tid].get('status_label'):
+                                self.download_tasks[tid]['status_label'].configure(text=f"Status: Failed - Invalid URL format", text_color="red")
+                        except Exception:
+                            pass
+                    self.after(50, _mark_invalid)
                     continue
                 # Create a unique ID for each download task
                 task_id = f"task_{hash(url)}_{self.queue_row_counter}"
+                # Pre-register task to avoid race with queue processor thread
+                if task_id not in self.download_tasks:
+                    self.download_tasks[task_id] = {
+                        'url': url,
+                        'stop_event': threading.Event(),
+                        'pause_event': threading.Event(),
+                        'frame': None,
+                        'progress_bar': None,
+                        'enhanced_progress': None,
+                        'tracker': None,
+                        'status_label': None,
+                        'cancel_button': None,
+                        'pause_button': None,
+                        'resume_button': None,
+                    }
                 with self._queue_lock:
                     self._download_queue_list.append({'task_id': task_id, 'url': url, 'api_key': api_key, 'download_path': download_path})
                     self._queue_condition.notify() # Signal that a new item has been added
@@ -531,20 +569,22 @@ class App(ctk.CTk):
         # Create progress tracker
         tracker = progress_manager.create_tracker(task_id)
         tracker.set_phase(ProgressPhase.INITIALIZING)
-        # Store references to update later
+        # Store references to update later. If a placeholder already exists (pre-registered
+        # in _add_urls_to_queue), update it instead of overwriting to avoid races.
+        existing = self.download_tasks.get(task_id, {})
         self.download_tasks[task_id] = {
             'frame': task_frame,
             'label': task_label,
             'progress_bar': enhanced_progress.progress_bar,  # For backward compatibility
             'enhanced_progress': enhanced_progress,
             'tracker': tracker,
-            'status_label': None,  # Will be set below for compatibility
-            'url': url, # Store original URL for full display if needed
-            'stop_event': threading.Event(), # Per-task stop event
-            'pause_event': threading.Event(), # Per-task pause event
-            'cancel_button': None, # Placeholder for cancel button reference
-            'pause_button': None, # Placeholder for pause button reference
-            'resume_button': None # Placeholder for resume button reference
+            'status_label': existing.get('status_label'),  # Might not exist; keep None
+            'url': existing.get('url', url), # Preserve original URL if set
+            'stop_event': existing.get('stop_event', threading.Event()), # Per-task stop event
+            'pause_event': existing.get('pause_event', threading.Event()), # Per-task pause event
+            'cancel_button': existing.get('cancel_button'),
+            'pause_button': existing.get('pause_button'),
+            'resume_button': existing.get('resume_button')
         }
         # Control Buttons Frame
         button_frame = ctk.CTkFrame(task_frame, fg_color="transparent")
@@ -805,7 +845,14 @@ class App(ctk.CTk):
                 download_path = task['download_path']
                 
                 # Retrieve task_stop_event after popping as the task_id might be new
-                if task_id not in self.download_tasks: # Should not happen if _add_download_task_ui is called first
+                # In rare cases the UI thread may not have registered the task yet.
+                if task_id not in self.download_tasks:
+                    # Wait briefly for UI registration to catch up
+                    waited = 0
+                    while task_id not in self.download_tasks and waited < 1.0:
+                        time.sleep(0.05)
+                        waited += 0.05
+                if task_id not in self.download_tasks:
                     self.log_message(f"Error: Task {task_id} not found in download_tasks dictionary. Skipping.")
                     continue
                 task_stop_event = self.download_tasks[task_id]['stop_event']
