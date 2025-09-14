@@ -26,6 +26,12 @@ from src.gui.utils import (
     validate_path
 )
 
+# Import download tab component
+from src.gui.download_tab import create_download_tab
+
+# Import history tab component
+from src.gui.history_tab import create_history_tab
+
 # Assuming civitai_downloader functions are available
 from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded
 from src.history_manager import HistoryManager
@@ -69,11 +75,11 @@ class App(ctk.CTk):
         self.download_tab = self.notebook.add("Downloads")
         self.history_tab = self.notebook.add("History")
         
-        # Setup download tab
-        self._setup_download_tab()
+        # Setup download tab using component
+        self.download_tab_component = create_download_tab(self, self.download_tab)
         
-        # Setup history tab
-        self._setup_history_tab()
+        # Setup history tab using component
+        self.history_tab_component = create_history_tab(self, self.history_tab)
     
     def _start_progress_processor(self):
         """Start the progress processor to handle UI updates efficiently"""

@@ -5475,6 +5475,151 @@
       "trigger_words": [],
       "metadata_path": "Q:/Models.v2/Qwen\\LORA\\Painterly - CE\\V01b - Qwen\\metadata.json",
       "html_report_path": "Q:/Models.v2/Qwen\\LORA\\Painterly - CE\\V01b - Qwen\\report.html"
+    },
+    {
+      "id": "09581696-4a66-41d0-adf8-80465f222e4c",
+      "model_id": 1353456,
+      "version_id": 2165388,
+      "model_name": "ReaPony",
+      "version_name": "v7.0",
+      "model_type": "Checkpoint",
+      "base_model": "Pony",
+      "download_path": "Q:\\Models.v2\\Pony\\Checkpoint\\ReaPony\\v7.0",
+      "download_date": "2025-09-13T19:05:43.868568",
+      "file_size": 6938040706.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Pony\\Checkpoint\\ReaPony\\v7.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Pony\\Checkpoint\\ReaPony\\v7.0\\report.html"
+    },
+    {
+      "id": "2fe5697c-c251-4856-86d3-46d82889a321",
+      "model_id": 1951846,
+      "version_id": 2209429,
+      "model_name": "minij",
+      "version_name": "e4",
+      "model_type": "Checkpoint",
+      "base_model": "Illustrious",
+      "download_path": "Q:\\Models.v2\\Illustrious\\Checkpoint\\minij\\e4",
+      "download_date": "2025-09-13T19:09:01.022408",
+      "file_size": 6938040400.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Illustrious\\Checkpoint\\minij\\e4\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Illustrious\\Checkpoint\\minij\\e4\\report.html"
+    },
+    {
+      "id": "b5b7c8b7-1f43-4077-a023-48df54b3b6ca",
+      "model_id": 1946078,
+      "version_id": 2210683,
+      "model_name": "The 'O' Face",
+      "version_name": "[QWEN] OFace - The 'Gasm",
+      "model_type": "LORA",
+      "base_model": "Qwen",
+      "download_path": "Q:\\Models.v2\\Qwen\\LORA\\The 'O' Face\\[QWEN] OFace - The 'Gasm",
+      "download_date": "2025-09-13T19:23:09.863846",
+      "file_size": 590057112.0,
+      "trigger_words": [
+        "having an orgasm"
+      ],
+      "metadata_path": "Q:/Models.v2/Qwen\\LORA\\The 'O' Face\\[QWEN] OFace - The 'Gasm\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Qwen\\LORA\\The 'O' Face\\[QWEN] OFace - The 'Gasm\\report.html"
+    },
+    {
+      "id": "9b51df4e-0370-4fdf-a8ee-9309f204ec53",
+      "model_id": 1926133,
+      "version_id": 2211660,
+      "model_name": "AnimeStyle LoRAs",
+      "version_name": "AnimeU1 v1.0",
+      "model_type": "LORA",
+      "base_model": "Qwen",
+      "download_path": "Q:\\Models.v2\\Qwen\\LORA\\AnimeStyle LoRAs\\AnimeU1 v1.0",
+      "download_date": "2025-09-13T19:23:19.944826",
+      "file_size": 295146160.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Qwen\\LORA\\AnimeStyle LoRAs\\AnimeU1 v1.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Qwen\\LORA\\AnimeStyle LoRAs\\AnimeU1 v1.0\\report.html"
+    },
+    {
+      "id": "bfed533f-6c14-4da1-819a-d0cea5f350d4",
+      "model_id": 1954268,
+      "version_id": 2211804,
+      "model_name": "Detailz-QWEN",
+      "version_name": "v1.0 Detailz-QWEN",
+      "model_type": "LORA",
+      "base_model": "Qwen",
+      "download_path": "Q:\\Models.v2\\Qwen\\LORA\\Detailz-QWEN\\v1.0 Detailz-QWEN",
+      "download_date": "2025-09-13T19:23:35.153986",
+      "file_size": 442602592.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Qwen\\LORA\\Detailz-QWEN\\v1.0 Detailz-QWEN\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Qwen\\LORA\\Detailz-QWEN\\v1.0 Detailz-QWEN\\report.html"
+    },
+    {
+      "id": "1a792388-1773-43fd-bde5-41a388c3f24e",
+      "model_id": 1954829,
+      "version_id": 2212454,
+      "model_name": "Qwen_ Movie Poster Design",
+      "version_name": "v1.0",
+      "model_type": "LORA",
+      "base_model": "Qwen",
+      "download_path": "Q:\\Models.v2\\Qwen\\LORA\\Qwen_ Movie Poster Design\\v1.0",
+      "download_date": "2025-09-13T19:23:44.623368",
+      "file_size": 236117040.0,
+      "trigger_words": [
+        "Movie poster design"
+      ],
+      "metadata_path": "Q:/Models.v2/Qwen\\LORA\\Qwen_ Movie Poster Design\\v1.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Qwen\\LORA\\Qwen_ Movie Poster Design\\v1.0\\report.html"
+    },
+    {
+      "id": "22f404d7-f32a-4f8d-9643-e1518d290b26",
+      "model_id": 1744356,
+      "version_id": 2212879,
+      "model_name": "Vector Paintings",
+      "version_name": "v1.0 Qwen",
+      "model_type": "LORA",
+      "base_model": "Qwen",
+      "download_path": "Q:\\Models.v2\\Qwen\\LORA\\Vector Paintings\\v1.0 Qwen",
+      "download_date": "2025-09-13T19:24:04.305672",
+      "file_size": 590058912.0,
+      "trigger_words": [
+        "VectorPaintDaal"
+      ],
+      "metadata_path": "Q:/Models.v2/Qwen\\LORA\\Vector Paintings\\v1.0 Qwen\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Qwen\\LORA\\Vector Paintings\\v1.0 Qwen\\report.html"
+    },
+    {
+      "id": "7253497e-e6fd-4fe8-8b82-3128d21424b4",
+      "model_id": 1744356,
+      "version_id": 2077393,
+      "model_name": "Vector Paintings",
+      "version_name": "v1.0 Illustrious",
+      "model_type": "LORA",
+      "base_model": "Illustrious",
+      "download_path": "Q:\\Models.v2\\Illustrious\\LORA\\Vector Paintings\\v1.0 Illustrious",
+      "download_date": "2025-09-13T19:24:12.959567",
+      "file_size": 228462764.0,
+      "trigger_words": [
+        "VectorPaintDaal"
+      ],
+      "metadata_path": "Q:/Models.v2/Illustrious\\LORA\\Vector Paintings\\v1.0 Illustrious\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Illustrious\\LORA\\Vector Paintings\\v1.0 Illustrious\\report.html"
+    },
+    {
+      "id": "07c4c029-4ca3-4545-b307-b556aa7f7d3c",
+      "model_id": 1955215,
+      "version_id": 2212931,
+      "model_name": "Overfilled Lips v1.0",
+      "version_name": "v1.0",
+      "model_type": "LORA",
+      "base_model": "Qwen",
+      "download_path": "Q:\\Models.v2\\Qwen\\LORA\\Overfilled Lips v1.0\\v1.0",
+      "download_date": "2025-09-13T19:24:23.420566",
+      "file_size": 295146192.0,
+      "trigger_words": [
+        "0verf1lled lips"
+      ],
+      "metadata_path": "Q:/Models.v2/Qwen\\LORA\\Overfilled Lips v1.0\\v1.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Qwen\\LORA\\Overfilled Lips v1.0\\v1.0\\report.html"
     }
   ]
 }
