@@ -5748,6 +5748,177 @@
       "trigger_words": [],
       "metadata_path": "Q:/Models.v2/Illustrious\\Checkpoint\\Bismuth Illustrious Mix\\v4.0\\metadata.json",
       "html_report_path": "Q:/Models.v2/Illustrious\\Checkpoint\\Bismuth Illustrious Mix\\v4.0\\report.html"
+    },
+    {
+      "id": "82b4faf1-2716-464f-af7c-5d750a777f09",
+      "model_id": 1954774,
+      "version_id": 2212384,
+      "model_name": "Cunnilingus - Pussy licking Lora I2V - Wan2.2 - K3NK",
+      "version_name": "High Noise - v1.0",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\Cunnilingus - Pussy licking Lora I2V - Wan2.2 - K3NK\\High Noise - v1.0",
+      "download_date": "2025-09-13T20:15:34.006112",
+      "file_size": 306807976.0,
+      "trigger_words": [
+        "cunn1l1ngu5"
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Cunnilingus - Pussy licking Lora I2V - Wan2.2 - K3NK\\High Noise - v1.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Cunnilingus - Pussy licking Lora I2V - Wan2.2 - K3NK\\High Noise - v1.0\\report.html"
+    },
+    {
+      "id": "3bd2e8ea-6c7b-4cb3-b590-d4ab8022e916",
+      "model_id": 1954733,
+      "version_id": 2212452,
+      "model_name": "Asshole - Wan 2.2 T2V/I2V 14B",
+      "version_name": "High noise",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 T2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 T2V-A14B\\LORA\\Asshole - Wan 2.2 T2V_I2V 14B\\High noise",
+      "download_date": "2025-09-13T20:16:07.511747",
+      "file_size": 1226934952.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 T2V-A14B\\LORA\\Asshole - Wan 2.2 T2V_I2V 14B\\High noise\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 T2V-A14B\\LORA\\Asshole - Wan 2.2 T2V_I2V 14B\\High noise\\report.html"
+    },
+    {
+      "id": "6c9a032b-67d4-4d12-a5bd-43322c417b4e",
+      "model_id": 1954733,
+      "version_id": 2212456,
+      "model_name": "Asshole - Wan 2.2 T2V/I2V 14B",
+      "version_name": "Low noise",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 T2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 T2V-A14B\\LORA\\Asshole - Wan 2.2 T2V_I2V 14B\\Low noise",
+      "download_date": "2025-09-13T20:16:43.744807",
+      "file_size": 1226934952.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 T2V-A14B\\LORA\\Asshole - Wan 2.2 T2V_I2V 14B\\Low noise\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 T2V-A14B\\LORA\\Asshole - Wan 2.2 T2V_I2V 14B\\Low noise\\report.html"
+    },
+    {
+      "id": "1773efae-0c3f-49b6-a39a-763176209559",
+      "model_id": 1663409,
+      "version_id": 2212521,
+      "model_name": "Seductive Turns",
+      "version_name": "WAN 2.2 I2V High",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\Seductive Turns\\WAN 2.2 I2V High",
+      "download_date": "2025-09-13T20:16:59.928365",
+      "file_size": 306847520.0,
+      "trigger_words": [
+        "doing the turning pose",
+        "she is turning a half circle and then walks away"
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Seductive Turns\\WAN 2.2 I2V High\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Seductive Turns\\WAN 2.2 I2V High\\report.html"
+    },
+    {
+      "id": "7ea1c6c2-1d96-4619-a276-bba7071568ae",
+      "model_id": 1663409,
+      "version_id": 2212510,
+      "model_name": "Seductive Turns",
+      "version_name": "WAN 2.2  I2V Low",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\Seductive Turns\\WAN 2.2  I2V Low",
+      "download_date": "2025-09-13T20:17:10.235285",
+      "file_size": 306847512.0,
+      "trigger_words": [
+        "doing the turning pose",
+        "she is turning a half circle and then walks away"
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Seductive Turns\\WAN 2.2  I2V Low\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Seductive Turns\\WAN 2.2  I2V Low\\report.html"
+    },
+    {
+      "id": "1a5509bb-31f4-417d-953f-c9db51e390da",
+      "model_id": 1953877,
+      "version_id": 2211358,
+      "model_name": "Princess Peach - The Super Mario Bros. Movie (Wan Video 2.2 T2V-A14B)",
+      "version_name": "Low Noise 2.2 v1.0",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 T2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 T2V-A14B\\LORA\\Princess Peach - The Super Mario Bros. Movie (Wan Video 2.2 T2V-A14B)\\Low Noise 2.2 v1.0",
+      "download_date": "2025-09-13T20:17:24.102468",
+      "file_size": 306807159.0,
+      "trigger_words": [
+        "Princess Peach",
+        "3D Cartoon Style",
+        "Long Blonde Hair"
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 T2V-A14B\\LORA\\Princess Peach - The Super Mario Bros. Movie (Wan Video 2.2 T2V-A14B)\\Low Noise 2.2 v1.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 T2V-A14B\\LORA\\Princess Peach - The Super Mario Bros. Movie (Wan Video 2.2 T2V-A14B)\\Low Noise 2.2 v1.0\\report.html"
+    },
+    {
+      "id": "6e5d70fb-b222-495d-a3d3-567497a8519b",
+      "model_id": 1953877,
+      "version_id": 2211833,
+      "model_name": "Princess Peach - The Super Mario Bros. Movie (Wan Video 2.2 T2V-A14B)",
+      "version_name": "High Noise 2.2 v1.0",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 T2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 T2V-A14B\\LORA\\Princess Peach - The Super Mario Bros. Movie (Wan Video 2.2 T2V-A14B)\\High Noise 2.2 v1.0",
+      "download_date": "2025-09-13T20:17:36.158084",
+      "file_size": 306807159.0,
+      "trigger_words": [
+        "Princess Peach",
+        "3D Cartoon Style"
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 T2V-A14B\\LORA\\Princess Peach - The Super Mario Bros. Movie (Wan Video 2.2 T2V-A14B)\\High Noise 2.2 v1.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 T2V-A14B\\LORA\\Princess Peach - The Super Mario Bros. Movie (Wan Video 2.2 T2V-A14B)\\High Noise 2.2 v1.0\\report.html"
+    },
+    {
+      "id": "57b884da-561a-4176-bb0a-a11f14bb208f",
+      "model_id": 1954274,
+      "version_id": 2211812,
+      "model_name": "Wan2.2-Fun-A14B-InP-low-noise-HPS2.1",
+      "version_name": "v1.0",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 T2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 T2V-A14B\\LORA\\Wan2.2-Fun-A14B-InP-low-noise-HPS2.1\\v1.0",
+      "download_date": "2025-09-13T20:18:37.436636",
+      "file_size": 858457436.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 T2V-A14B\\LORA\\Wan2.2-Fun-A14B-InP-low-noise-HPS2.1\\v1.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 T2V-A14B\\LORA\\Wan2.2-Fun-A14B-InP-low-noise-HPS2.1\\v1.0\\report.html"
+    },
+    {
+      "id": "576d2e47-5b7a-4bec-9834-4370ba99c730",
+      "model_id": 1954109,
+      "version_id": 2211629,
+      "model_name": "Wan 2.2 I2V Shoejob",
+      "version_name": "v1.0_WAN22_HIGHNOISE",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\Wan 2.2 I2V Shoejob\\v1.0_WAN22_HIGHNOISE",
+      "download_date": "2025-09-13T20:18:51.828214",
+      "file_size": 306847912.0,
+      "trigger_words": [
+        "a woman is sitting in front of a man. she is wearing [shoes]. her feet move up and down. the woman is performing a shoejob.",
+        "the woman brings her feet together around the man's penis. she smashes the man's penis between her shoes."
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Wan 2.2 I2V Shoejob\\v1.0_WAN22_HIGHNOISE\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Wan 2.2 I2V Shoejob\\v1.0_WAN22_HIGHNOISE\\report.html"
+    },
+    {
+      "id": "d1233e0b-778b-40af-b632-e649196c6ebf",
+      "model_id": 1954109,
+      "version_id": 2211754,
+      "model_name": "Wan 2.2 I2V Shoejob",
+      "version_name": "v1.0_WAN22_LOWNOISE",
+      "model_type": "LORA",
+      "base_model": "Wan Video 2.2 I2V-A14B",
+      "download_path": "Q:\\Models.v2\\Wan Video 2.2 I2V-A14B\\LORA\\Wan 2.2 I2V Shoejob\\v1.0_WAN22_LOWNOISE",
+      "download_date": "2025-09-13T20:19:02.346156",
+      "file_size": 306847528.0,
+      "trigger_words": [
+        "a woman is sitting in front of a man. she is wearing [shoes]. her feet move up and down. the woman is performing a shoejob.",
+        "the woman brings her feet together around the man's penis. she smashes the man's penis between her shoes."
+      ],
+      "metadata_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Wan 2.2 I2V Shoejob\\v1.0_WAN22_LOWNOISE\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Wan Video 2.2 I2V-A14B\\LORA\\Wan 2.2 I2V Shoejob\\v1.0_WAN22_LOWNOISE\\report.html"
     }
   ]
 }
