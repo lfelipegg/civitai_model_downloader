@@ -1,3 +1,9 @@
+"""
+Main window class for the Civitai Model Downloader GUI.
+
+This module contains the primary application window and its initialization.
+"""
+
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -12,8 +18,8 @@ import queue # For thread-safe progress updates
 
 # Import utilities module
 from src.gui.utils import (
-    browse_text_file,
-    browse_directory,
+    browse_text_file, 
+    browse_directory, 
     open_folder_cross_platform,
     validate_civitai_url,
     parse_urls_from_text,
@@ -33,7 +39,10 @@ from src.progress_tracker import progress_manager, ProgressPhase, ProgressStats
 from src.thumbnail_manager import thumbnail_manager
 from src.enhanced_progress_bar import EnhancedProgressWidget, ThumbnailWidget
 
+
 class App(ctk.CTk):
+    """Main application window class."""
+    
     def __init__(self):
         super().__init__()
 
@@ -223,7 +232,7 @@ class App(ctk.CTk):
         # Configure grid layout to expand queue and log area
         self.download_tab.grid_rowconfigure(5, weight=2) # Queue frame
         self.download_tab.grid_rowconfigure(7, weight=1) # Log area
-
+    
     def _setup_history_tab(self):
         """Setup the download history tab."""
         # Configure grid layout for history tab
@@ -1326,7 +1335,7 @@ class App(ctk.CTk):
         
         # Buttons frame (adjusted for thumbnail)
         buttons_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
-        buttons_frame.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+        buttons_frame.grid(row=1, columnspan=2, padx=5, pady=5, sticky="ew")
         
         # Open folder button
         open_btn = ctk.CTkButton(
@@ -1559,7 +1568,7 @@ class App(ctk.CTk):
         
         if not open_folder_cross_platform(download_path):
             messagebox.showerror("Error", "Could not open folder.")
-    
+
     def view_model_report(self, download):
         """Open the model's HTML report."""
         html_report_path = download.get('html_report_path')
@@ -1639,6 +1648,7 @@ class App(ctk.CTk):
             hover_color="darkred"
         )
         delete_btn.pack(side="right", padx=5)
+
 
 if __name__ == "__main__":
     app = App()
