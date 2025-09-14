@@ -10,6 +10,9 @@ import time
 import urllib.parse # Added for URL validation
 import queue # For thread-safe progress updates
 
+# Import memory monitor
+from src.memory_monitor import memory_monitor, MemoryWarningLevel
+
 # Import utilities module
 from src.gui.utils import (
     browse_text_file,
@@ -60,6 +63,9 @@ class App(ctk.CTk):
 
         # Initialize history manager
         self.history_manager = HistoryManager()
+        
+        # Initialize memory monitoring
+        self._setup_memory_monitoring()
 
         self.protocol("WM_DELETE_WINDOW", self._on_closing) # Handle window close event
 
@@ -80,6 +86,66 @@ class App(ctk.CTk):
         
         # Setup history tab using component
         self.history_tab_component = create_history_tab(self, self.history_tab)
+        
+        # Start memory monitoring
+        memory_monitor.start_monitoring()
+    
+    def _setup_memory_monitoring(self):
+        """Setup memory monitoring with warning callbacks"""
+        def memory_warning_callback(stats):
+            """Handle memory warnings"""
+            try:
+                warning_message = (
+                    f"Memory Warning ({stats.warning_level.value.title()}):\n"
+                    f"Process: {stats.process_memory_mb:.1f} MB\n"
+                    f"System: {stats.system_memory_percent:.1f}% used\n"
+                    f"Available: {stats.available_memory_mb:.1f} MB"
+                )
+                
+                # Use thread-safe UI updates
+                self.after(0, lambda: self._show_memory_warning(warning_message, stats.warning_level))
+                
+                # Auto-cleanup for high/critical warnings
+                if stats.warning_level in [MemoryWarningLevel.HIGH, MemoryWarningLevel.CRITICAL]:
+                    self.after(0, self._perform_memory_cleanup)
+                    
+            except Exception as e:
+                print(f"Error handling memory warning: {e}")
+        
+        # Set the warning callback
+        memory_monitor.warning_callback = memory_warning_callback
+    
+    def _show_memory_warning(self, message, level):
+        """Show memory warning dialog"""
+        try:
+            if level == MemoryWarningLevel.CRITICAL:
+                messagebox.showerror("Critical Memory Warning",
+                    f"{message}\n\nApplication may become unstable. Consider closing unused downloads or restarting the application.")
+            elif level == MemoryWarningLevel.HIGH:
+                messagebox.showwarning("High Memory Usage",
+                    f"{message}\n\nConsider pausing downloads or clearing cache.")
+            elif level == MemoryWarningLevel.MEDIUM:
+                # Just log medium warnings to avoid too many popups
+                self.log_message(f"Memory usage warning: {message}")
+        except Exception as e:
+            print(f"Error showing memory warning: {e}")
+    
+    def _perform_memory_cleanup(self):
+        """Perform automatic memory cleanup"""
+        try:
+            self.log_message("Performing automatic memory cleanup...")
+            
+            # Force cleanup
+            cleanup_successful = memory_monitor.force_cleanup()
+            
+            if cleanup_successful:
+                self.log_message("Memory cleanup completed successfully.")
+            else:
+                self.log_message("Memory cleanup encountered some issues.")
+                
+        except Exception as e:
+            print(f"Error during memory cleanup: {e}")
+            self.log_message(f"Error during memory cleanup: {e}")
     
     def _start_progress_processor(self):
         """Start the progress processor to handle UI updates efficiently"""
@@ -947,47 +1013,113 @@ class App(ctk.CTk):
             self.stop_event.set() # Signal main queue processing thread to stop
             self.log_message("Shutdown initiated. Signalling individual downloads to stop...")
             
-            # Stop progress processor
+            # Stop progress processor first
             try:
                 self.progress_queue.put_nowait(None)  # Poison pill to stop progress processor
-            except queue.Full:
+            except (queue.Full, AttributeError):
                 pass
             
             # Signal all individual download threads to stop and clear pause events
-            for task_id, task_data in list(self.download_tasks.items()): # Iterate over a copy as dict might change
-                if 'stop_event' in task_data:
-                    task_data['stop_event'].set()
-                if 'pause_event' in task_data: # Clear pause event to unblock any waiting threads
-                    task_data['pause_event'].clear()
-                if task_data.get('cancel_button'):
-                    task_data['cancel_button'].configure(state="disabled", text="Stopping...")
-                if task_data.get('pause_button'):
-                    task_data['pause_button'].configure(state="disabled")
-                if task_data.get('resume_button'):
-                    task_data['resume_button'].configure(state="disabled")
-
-            # Clear background threads tracking
-            self.background_threads.clear()
+            active_tasks = list(self.download_tasks.items())  # Iterate over a copy as dict might change
+            for task_id, task_data in active_tasks:
+                try:
+                    if 'stop_event' in task_data and hasattr(task_data['stop_event'], 'set'):
+                        task_data['stop_event'].set()
+                    if 'pause_event' in task_data and hasattr(task_data['pause_event'], 'clear'):
+                        task_data['pause_event'].clear()  # Clear pause event to unblock any waiting threads
+                    
+                    # Update UI elements safely
+                    if task_data.get('cancel_button'):
+                        try:
+                            task_data['cancel_button'].configure(state="disabled", text="Stopping...")
+                        except:
+                            pass
+                    if task_data.get('pause_button'):
+                        try:
+                            task_data['pause_button'].configure(state="disabled")
+                        except:
+                            pass
+                    if task_data.get('resume_button'):
+                        try:
+                            task_data['resume_button'].configure(state="disabled")
+                        except:
+                            pass
+                except Exception as e:
+                    print(f"Error stopping task {task_id}: {e}")
 
             self.log_message("Waiting for threads to finish...")
             
-            # Wait for the progress processor thread to finish
+            # Collect all threads that need to be waited for
+            threads_to_wait = []
+            
+            # Progress processor thread
             if hasattr(self, 'progress_thread') and self.progress_thread.is_alive():
-                self.progress_thread.join(timeout=2)
-                if self.progress_thread.is_alive():
-                    self.log_message("Progress processor thread did not terminate gracefully.")
+                threads_to_wait.append(('progress_thread', self.progress_thread, 2))
             
-            # Wait for the queue processor thread to finish
+            # Queue processor thread
             if hasattr(self, 'queue_processor_thread') and self.queue_processor_thread.is_alive():
-                self.queue_processor_thread.join(timeout=5) # Give it some time to clean up
-                if self.queue_processor_thread.is_alive():
-                    self.log_message("Queue processor thread did not terminate gracefully.")
+                threads_to_wait.append(('queue_processor_thread', self.queue_processor_thread, 5))
             
-            # Wait for the completion watcher thread to finish
+            # Completion watcher thread
             if hasattr(self, 'completion_watcher_thread') and self.completion_watcher_thread.is_alive():
-                self.completion_watcher_thread.join(timeout=5)
-                if self.completion_watcher_thread.is_alive():
-                    self.log_message("Completion watcher thread did not terminate gracefully.")
+                threads_to_wait.append(('completion_watcher_thread', self.completion_watcher_thread, 3))
+            
+            # Processing and completion thread
+            if hasattr(self, 'processing_and_completion_thread') and self.processing_and_completion_thread.is_alive():
+                threads_to_wait.append(('processing_and_completion_thread', self.processing_and_completion_thread, 3))
+            
+            # Wait for all background threads with proper timeouts
+            background_threads_copy = dict(self.background_threads)  # Create copy to avoid modification during iteration
+            for task_id, bg_thread in background_threads_copy.items():
+                if bg_thread and bg_thread.is_alive():
+                    threads_to_wait.append((f'background_thread_{task_id}', bg_thread, 2))
+            
+            # Wait for each thread with individual timeouts
+            total_wait_start = time.time()
+            for thread_name, thread, timeout in threads_to_wait:
+                if time.time() - total_wait_start > 15:  # Total timeout of 15 seconds
+                    self.log_message("Thread cleanup timeout exceeded, forcing shutdown...")
+                    break
+                    
+                try:
+                    thread.join(timeout=timeout)
+                    if thread.is_alive():
+                        self.log_message(f"{thread_name} did not terminate gracefully within {timeout}s.")
+                    else:
+                        self.log_message(f"{thread_name} terminated successfully.")
+                except Exception as e:
+                    self.log_message(f"Error waiting for {thread_name}: {e}")
+            
+            # Clear all thread references
+            self.background_threads.clear()
+            
+            # Clean up progress manager resources
+            try:
+                if hasattr(self, 'download_tasks'):
+                    for task_id in list(self.download_tasks.keys()):
+                        try:
+                            from src.progress_tracker import progress_manager
+                            progress_manager.remove_tracker(task_id)
+                        except:
+                            pass
+            except:
+                pass
+            
+            # Stop memory monitoring
+            try:
+                memory_monitor.stop_monitoring()
+                self.log_message("Memory monitoring stopped.")
+            except:
+                pass
+            
+            # Clean up thumbnail cache memory
+            try:
+                from src.thumbnail_manager import thumbnail_manager
+                thumbnail_manager.cleanup_cache()
+            except:
+                pass
+            
+            self.log_message("Thread cleanup completed. Closing application...")
             self.destroy() # Close the main window
     def clear_gui(self):
         self.url_entry.delete("1.0", ctk.END)

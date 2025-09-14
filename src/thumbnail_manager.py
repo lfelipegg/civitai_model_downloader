@@ -49,6 +49,14 @@ class ThumbnailCache:
         # Cache index
         self._cache_index: Dict[str, ThumbnailInfo] = {}
         
+        # Enhanced eviction settings
+        self.cleanup_threshold = 0.8  # Start cleanup at 80% of max size
+        self.target_size_after_cleanup = 0.6  # Clean down to 60% of max size
+        self.min_access_interval = 3600  # 1 hour minimum between accesses to avoid constant cleanup
+        
+        # Access tracking
+        self._access_times: Dict[str, float] = {}
+        
         # Initialize cache directory and load index
         self._init_cache_directory()
         self._load_cache_index()
@@ -152,12 +160,17 @@ class ThumbnailCache:
                 except:
                     pass
                 del self._cache_index[cache_key]
+                self._access_times.pop(cache_key, None)
                 return None
             
             # Check if thumbnail file exists
             if not os.path.exists(info.thumbnail_path):
                 del self._cache_index[cache_key]
+                self._access_times.pop(cache_key, None)
                 return None
+            
+            # Update access time for LRU tracking
+            self._update_access_time(cache_key)
             
             return info.thumbnail_path
     
@@ -178,49 +191,129 @@ class ThumbnailCache:
             self._cache_index[cache_key] = info
             self._save_cache_index()
     
-    def cleanup_old_thumbnails(self):
-        """Remove old thumbnails to keep cache size under limit"""
+    def cleanup_old_thumbnails(self, force_aggressive: bool = False):
+        """Remove old thumbnails to keep cache size under limit with improved eviction strategy"""
         with self._lock:
             try:
-                # Calculate current cache size
+                # Calculate current cache size and collect file info
                 total_size = 0
-                file_sizes = []
+                file_info = []
+                current_time = time.time()
                 
-                for info in self._cache_index.values():
+                for key, info in self._cache_index.items():
                     try:
                         if os.path.exists(info.thumbnail_path):
                             size = os.path.getsize(info.thumbnail_path)
                             total_size += size
-                            file_sizes.append((info.created_time, info.thumbnail_path, size))
-                    except:
-                        pass
+                            
+                            # Get last access time (default to creation time if never accessed)
+                            last_access = self._access_times.get(key, info.created_time)
+                            
+                            # Calculate score for eviction (higher score = more likely to evict)
+                            age_score = current_time - info.created_time  # Age since creation
+                            access_score = current_time - last_access    # Time since last access
+                            size_score = size / (1024 * 1024)           # Size in MB
+                            
+                            # Combined eviction score (weighted)
+                            eviction_score = (age_score * 0.3) + (access_score * 0.5) + (size_score * 0.2)
+                            
+                            file_info.append({
+                                'key': key,
+                                'info': info,
+                                'size': size,
+                                'eviction_score': eviction_score,
+                                'last_access': last_access
+                            })
+                    except Exception as e:
+                        print(f"Error processing thumbnail {info.thumbnail_path}: {e}")
+                        continue
                 
-                # If over limit, remove oldest files
-                if total_size > self.max_size_bytes:
-                    file_sizes.sort()  # Sort by creation time (oldest first)
+                # Determine if cleanup is needed
+                cleanup_threshold_bytes = self.max_size_bytes * self.cleanup_threshold
+                target_size_bytes = self.max_size_bytes * self.target_size_after_cleanup
+                
+                if total_size > cleanup_threshold_bytes or force_aggressive:
+                    # Sort by eviction score (highest first - most likely to evict)
+                    file_info.sort(key=lambda x: x['eviction_score'], reverse=True)
                     
-                    for created_time, thumbnail_path, size in file_sizes:
-                        if total_size <= self.max_size_bytes:
+                    removed_count = 0
+                    removed_size = 0
+                    target_size = target_size_bytes if not force_aggressive else self.max_size_bytes * 0.3
+                    
+                    for item in file_info:
+                        if total_size <= target_size:
                             break
                         
                         try:
-                            os.remove(thumbnail_path)
-                            total_size -= size
+                            # Remove the thumbnail file
+                            os.remove(item['info'].thumbnail_path)
                             
-                            # Remove from index
-                            keys_to_remove = [
-                                key for key, info in self._cache_index.items()
-                                if info.thumbnail_path == thumbnail_path
-                            ]
-                            for key in keys_to_remove:
-                                del self._cache_index[key]
-                        except:
-                            pass
+                            # Update tracking
+                            total_size -= item['size']
+                            removed_size += item['size']
+                            removed_count += 1
+                            
+                            # Remove from index and access tracking
+                            del self._cache_index[item['key']]
+                            self._access_times.pop(item['key'], None)
+                            
+                        except Exception as e:
+                            print(f"Error removing thumbnail {item['info'].thumbnail_path}: {e}")
                     
-                    self._save_cache_index()
-                    
+                    if removed_count > 0:
+                        self._save_cache_index()
+                        print(f"Thumbnail cache cleanup: removed {removed_count} files, "
+                              f"freed {removed_size / (1024*1024):.1f} MB, "
+                              f"cache size now {total_size / (1024*1024):.1f} MB")
+                
+                return total_size
+                
             except Exception as e:
                 print(f"Error during thumbnail cache cleanup: {e}")
+                return 0
+    
+    def _update_access_time(self, cache_key: str):
+        """Update access time for a cache entry"""
+        current_time = time.time()
+        last_access = self._access_times.get(cache_key, 0)
+        
+        # Only update if enough time has passed to avoid excessive updates
+        if current_time - last_access > self.min_access_interval / 10:  # Update every 6 minutes max
+            self._access_times[cache_key] = current_time
+    
+    def get_cache_usage_info(self) -> Dict[str, any]:
+        """Get detailed cache usage information"""
+        with self._lock:
+            total_size = 0
+            file_count = 0
+            oldest_file_age = 0
+            newest_file_age = float('inf')
+            current_time = time.time()
+            
+            for info in self._cache_index.values():
+                try:
+                    if os.path.exists(info.thumbnail_path):
+                        size = os.path.getsize(info.thumbnail_path)
+                        total_size += size
+                        file_count += 1
+                        
+                        age = current_time - info.created_time
+                        oldest_file_age = max(oldest_file_age, age)
+                        newest_file_age = min(newest_file_age, age)
+                except:
+                    pass
+            
+            return {
+                'total_size_mb': total_size / (1024 * 1024),
+                'total_size_bytes': total_size,
+                'max_size_mb': self.max_size_bytes / (1024 * 1024),
+                'usage_percent': (total_size / self.max_size_bytes) * 100 if self.max_size_bytes > 0 else 0,
+                'file_count': file_count,
+                'oldest_file_age_hours': oldest_file_age / 3600,
+                'newest_file_age_hours': newest_file_age / 3600 if newest_file_age != float('inf') else 0,
+                'cleanup_threshold_mb': (self.max_size_bytes * self.cleanup_threshold) / (1024 * 1024),
+                'needs_cleanup': total_size > (self.max_size_bytes * self.cleanup_threshold)
+            }
 
 
 class ThumbnailManager:
@@ -410,9 +503,9 @@ class ThumbnailManager:
         
         return str(fallback_path) if fallback_path.exists() else None
     
-    def cleanup_cache(self):
+    def cleanup_cache(self, force_aggressive: bool = False):
         """Clean up old thumbnails to free space"""
-        self.cache.cleanup_old_thumbnails()
+        return self.cache.cleanup_old_thumbnails(force_aggressive=force_aggressive)
     
     def preload_thumbnails(self, model_dirs: List[str], size: str = 'medium'):
         """
@@ -432,25 +525,46 @@ class ThumbnailManager:
         # Run in background thread
         thread = threading.Thread(target=preload_worker, daemon=True)
         thread.start()
+    
+    def get_memory_usage(self) -> float:
+        """Get estimated memory usage of thumbnail cache in MB"""
+        try:
+            cache_info = self.cache.get_cache_usage_info()
+            return cache_info.get('total_size_mb', 0)
+        except:
+            return 0
+    
+    def should_cleanup(self) -> bool:
+        """Check if cache cleanup is recommended"""
+        try:
+            cache_info = self.cache.get_cache_usage_info()
+            return cache_info.get('needs_cleanup', False)
+        except:
+            return False
         
     def get_cache_stats(self) -> Dict[str, any]:
-        """Get thumbnail cache statistics"""
-        with self.cache._lock:
-            total_thumbnails = len(self.cache._cache_index)
-            total_size = 0
+        """Get comprehensive thumbnail cache statistics"""
+        try:
+            # Get basic cache info
+            cache_info = self.cache.get_cache_usage_info()
             
-            for info in self.cache._cache_index.values():
-                try:
-                    if os.path.exists(info.thumbnail_path):
-                        total_size += os.path.getsize(info.thumbnail_path)
-                except:
-                    pass
-            
-            return {
-                'total_thumbnails': total_thumbnails,
-                'total_size_mb': total_size / (1024 * 1024),
+            # Add additional PIL availability info
+            cache_info.update({
                 'cache_directory': str(self.cache.cache_dir),
-                'pil_available': PIL_AVAILABLE
+                'pil_available': PIL_AVAILABLE,
+                'total_thumbnails': len(self.cache._cache_index)
+            })
+            
+            return cache_info
+        except Exception as e:
+            print(f"Error getting cache stats: {e}")
+            return {
+                'total_thumbnails': 0,
+                'total_size_mb': 0,
+                'cache_directory': str(self.cache.cache_dir) if hasattr(self, 'cache') else 'unknown',
+                'pil_available': PIL_AVAILABLE,
+                'usage_percent': 0,
+                'needs_cleanup': False
             }
 
 

@@ -5620,6 +5620,134 @@
       ],
       "metadata_path": "Q:/Models.v2/Qwen\\LORA\\Overfilled Lips v1.0\\v1.0\\metadata.json",
       "html_report_path": "Q:/Models.v2/Qwen\\LORA\\Overfilled Lips v1.0\\v1.0\\report.html"
+    },
+    {
+      "id": "fefa6d2d-de43-4522-bfa2-c175436f91af",
+      "model_id": 1546313,
+      "version_id": 2211392,
+      "model_name": "Yoni-Pony",
+      "version_name": "v2.0",
+      "model_type": "Checkpoint",
+      "base_model": "Pony",
+      "download_path": "Q:\\Models.v2\\Pony\\Checkpoint\\Yoni-Pony\\v2.0",
+      "download_date": "2025-09-13T19:48:25.909479",
+      "file_size": 6938041176.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Pony\\Checkpoint\\Yoni-Pony\\v2.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Pony\\Checkpoint\\Yoni-Pony\\v2.0\\report.html"
+    },
+    {
+      "id": "2dc3235a-71c5-4a01-91a8-8355f3427abb",
+      "model_id": 1527265,
+      "version_id": 2204522,
+      "model_name": "Tiberium Illustrious mix",
+      "version_name": "v4.0",
+      "model_type": "Checkpoint",
+      "base_model": "Illustrious",
+      "download_path": "Q:\\Models.v2\\Illustrious\\Checkpoint\\Tiberium Illustrious mix\\v4.0",
+      "download_date": "2025-09-13T19:51:28.876734",
+      "file_size": 6938040706.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Illustrious\\Checkpoint\\Tiberium Illustrious mix\\v4.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Illustrious\\Checkpoint\\Tiberium Illustrious mix\\v4.0\\report.html"
+    },
+    {
+      "id": "49ae55ee-7c7a-46c8-b066-1d3930eb5abc",
+      "model_id": 389869,
+      "version_id": 1169143,
+      "model_name": "Rapscallion style (Jack Cayless) PDXL, Illustrious",
+      "version_name": "Rapscallion Illustrious",
+      "model_type": "LORA",
+      "base_model": "Illustrious",
+      "download_path": "Q:\\Models.v2\\Illustrious\\LORA\\Rapscallion style (Jack Cayless) PDXL, Illustrious\\Rapscallion Illustrious",
+      "download_date": "2025-09-13T19:51:37.095006",
+      "file_size": 228454761.0,
+      "trigger_words": [
+        "Rapscallionstyle"
+      ],
+      "metadata_path": "Q:/Models.v2/Illustrious\\LORA\\Rapscallion style (Jack Cayless) PDXL, Illustrious\\Rapscallion Illustrious\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Illustrious\\LORA\\Rapscallion style (Jack Cayless) PDXL, Illustrious\\Rapscallion Illustrious\\report.html"
+    },
+    {
+      "id": "34f1ccec-8c59-42b1-b96a-a3ac5ab26210",
+      "model_id": 113055,
+      "version_id": 1115701,
+      "model_name": "Incase style Illustrious, Flux, PDXL,1.5",
+      "version_name": "New Style Illustrious",
+      "model_type": "LORA",
+      "base_model": "Illustrious",
+      "download_path": "Q:\\Models.v2\\Illustrious\\LORA\\Incase style Illustrious, Flux, PDXL,1.5\\New Style Illustrious",
+      "download_date": "2025-09-13T19:51:46.014610",
+      "file_size": 228468820.0,
+      "trigger_words": [
+        "ICJournals",
+        "blocky, painterly"
+      ],
+      "metadata_path": "Q:/Models.v2/Illustrious\\LORA\\Incase style Illustrious, Flux, PDXL,1.5\\New Style Illustrious\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Illustrious\\LORA\\Incase style Illustrious, Flux, PDXL,1.5\\New Style Illustrious\\report.html"
+    },
+    {
+      "id": "60b772fb-ce70-4f61-b240-921dd0e492d0",
+      "model_id": 113055,
+      "version_id": 898710,
+      "model_name": "Incase style Illustrious, Flux, PDXL,1.5",
+      "version_name": "New Style Pony",
+      "model_type": "LORA",
+      "base_model": "Pony",
+      "download_path": "Q:\\Models.v2\\Pony\\LORA\\Incase style Illustrious, Flux, PDXL,1.5\\New Style Pony",
+      "download_date": "2025-09-13T19:51:55.493552",
+      "file_size": 228455760.0,
+      "trigger_words": [
+        "ICJournals",
+        "blocky, painterly"
+      ],
+      "metadata_path": "Q:/Models.v2/Pony\\LORA\\Incase style Illustrious, Flux, PDXL,1.5\\New Style Pony\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Pony\\LORA\\Incase style Illustrious, Flux, PDXL,1.5\\New Style Pony\\report.html"
+    },
+    {
+      "id": "7636c22b-d340-4ef6-ab25-1a225ba97de9",
+      "model_id": 1701083,
+      "version_id": 2208220,
+      "model_name": "RealTastic",
+      "version_name": "RealTastic 4",
+      "model_type": "Checkpoint",
+      "base_model": "Pony",
+      "download_path": "Q:\\Models.v2\\Pony\\Checkpoint\\RealTastic\\RealTastic 4",
+      "download_date": "2025-09-13T19:56:24.937048",
+      "file_size": 6938044834.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Pony\\Checkpoint\\RealTastic\\RealTastic 4\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Pony\\Checkpoint\\RealTastic\\RealTastic 4\\report.html"
+    },
+    {
+      "id": "b42de4d3-eded-4bed-afbb-0ad171cbe254",
+      "model_id": 1482734,
+      "version_id": 2184487,
+      "model_name": "Wicked Illustrious Mix",
+      "version_name": "v3.0",
+      "model_type": "Checkpoint",
+      "base_model": "Illustrious",
+      "download_path": "Q:\\Models.v2\\Illustrious\\Checkpoint\\Wicked Illustrious Mix\\v3.0",
+      "download_date": "2025-09-13T19:59:28.598998",
+      "file_size": 6938040706.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Illustrious\\Checkpoint\\Wicked Illustrious Mix\\v3.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Illustrious\\Checkpoint\\Wicked Illustrious Mix\\v3.0\\report.html"
+    },
+    {
+      "id": "299c3271-bd83-4c0d-a1c4-94922c03fe54",
+      "model_id": 1359028,
+      "version_id": 2131283,
+      "model_name": "Bismuth Illustrious Mix",
+      "version_name": "v4.0",
+      "model_type": "Checkpoint",
+      "base_model": "Illustrious",
+      "download_path": "Q:\\Models.v2\\Illustrious\\Checkpoint\\Bismuth Illustrious Mix\\v4.0",
+      "download_date": "2025-09-13T20:02:27.991355",
+      "file_size": 6938041706.0,
+      "trigger_words": [],
+      "metadata_path": "Q:/Models.v2/Illustrious\\Checkpoint\\Bismuth Illustrious Mix\\v4.0\\metadata.json",
+      "html_report_path": "Q:/Models.v2/Illustrious\\Checkpoint\\Bismuth Illustrious Mix\\v4.0\\report.html"
     }
   ]
 }
