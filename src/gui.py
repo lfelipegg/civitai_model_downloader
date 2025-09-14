@@ -645,13 +645,17 @@ class App(ctk.CTk):
         # Store references to update later. If a placeholder already exists (pre-registered
         # in _add_urls_to_queue), update it instead of overwriting to avoid races.
         existing = self.download_tasks.get(task_id, {})
+        # Create status label
+        status_label = ctk.CTkLabel(task_frame, text="Status: Initializing...", anchor="w")
+        status_label.grid(row=2, column=0, columnspan=2, padx=5, pady=2, sticky="w")
+        
         self.download_tasks[task_id] = {
             'frame': task_frame,
             'label': task_label,
             'progress_bar': enhanced_progress.progress_bar,  # For backward compatibility
             'enhanced_progress': enhanced_progress,
             'tracker': tracker,
-            'status_label': existing.get('status_label'),  # Might not exist; keep None
+            'status_label': status_label,  # Now properly created
             'url': existing.get('url', url), # Preserve original URL if set
             'stop_event': existing.get('stop_event', threading.Event()), # Per-task stop event
             'pause_event': existing.get('pause_event', threading.Event()), # Per-task pause event
@@ -998,10 +1002,14 @@ class App(ctk.CTk):
         """Safely update task status with error handling"""
         try:
             if task_id in self.download_tasks:
-                if text_color:
-                    self.download_tasks[task_id]['status_label'].configure(text=status_text, text_color=text_color)
+                status_label = self.download_tasks[task_id].get('status_label')
+                if status_label is not None:
+                    if text_color:
+                        status_label.configure(text=status_text, text_color=text_color)
+                    else:
+                        status_label.configure(text=status_text)
                 else:
-                    self.download_tasks[task_id]['status_label'].configure(text=status_text)
+                    print(f"Warning: status_label is None for task {task_id}")
         except Exception as e:
             print(f"Error updating status for task {task_id}: {e}")
     
