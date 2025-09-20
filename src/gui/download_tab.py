@@ -294,21 +294,73 @@ class DownloadTab:
             self.parent_app.after(0, lambda: self.download_button.configure(state="normal", text="Start Download"))
 
     def _add_download_task_ui(self, task_id, url):
-        """Add a download task to the UI."""
+        """Add a download task to the UI with enhanced card-based layout."""
         row = self.parent_app.queue_row_counter
         self.parent_app.queue_row_counter += 1
-        task_frame = ctk.CTkFrame(self.queue_frame)
-        task_frame.grid(row=row, column=0, padx=5, pady=5, sticky="ew")
+        
+        # Card-based layout with improved styling and hover effects
+        task_frame = ctk.CTkFrame(
+            self.queue_frame,
+            corner_radius=12,
+            border_width=1,
+            border_color=("gray80", "gray20")
+        )
+        task_frame.grid(row=row, column=0, padx=10, pady=8, sticky="ew")
         task_frame.grid_columnconfigure(1, weight=1)
         
-        # URL display
-        url_display = (url[:50] + '...') if len(url) > 53 else url
-        task_label = ctk.CTkLabel(task_frame, text=f"URL: {url_display}", anchor="w")
-        task_label.grid(row=0, column=0, padx=5, pady=2, sticky="w")
+        # Add hover effects for better interactivity
+        def on_enter(event):
+            task_frame.configure(border_color=("#2196F3", "#1976D2"))
+            
+        def on_leave(event):
+            task_frame.configure(border_color=("gray80", "gray20"))
+            
+        task_frame.bind("<Enter>", on_enter)
+        task_frame.bind("<Leave>", on_leave)
+        
+        # Header section with URL and controls
+        header_frame = ctk.CTkFrame(task_frame, fg_color="transparent")
+        header_frame.grid(row=0, column=0, columnspan=3, sticky="ew", padx=12, pady=(12, 8))
+        header_frame.grid_columnconfigure(1, weight=1)
+        
+        # Task status indicator (colored dot)
+        status_indicator = ctk.CTkLabel(
+            header_frame,
+            text="●",
+            font=ctk.CTkFont(size=16),
+            text_color="#ffa500",  # Orange for initializing
+            width=20
+        )
+        status_indicator.grid(row=0, column=0, padx=(0, 8), sticky="w")
+        
+        # URL display with better formatting
+        url_display = (url[:60] + '...') if len(url) > 63 else url
+        task_label = ctk.CTkLabel(
+            header_frame,
+            text=url_display,
+            anchor="w",
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        task_label.grid(row=0, column=1, padx=(0, 8), sticky="ew")
+        
+        # Status text (secondary information)
+        status_label = ctk.CTkLabel(
+            header_frame,
+            text="Initializing...",
+            anchor="e",
+            font=ctk.CTkFont(size=10),
+            text_color="gray"
+        )
+        status_label.grid(row=0, column=2, sticky="e")
+        
+        # Progress section
+        progress_frame = ctk.CTkFrame(task_frame, fg_color="transparent")
+        progress_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=12, pady=(0, 8))
+        progress_frame.grid_columnconfigure(0, weight=1)
         
         # Enhanced progress widget
-        enhanced_progress = EnhancedProgressWidget(task_frame, task_id)
-        enhanced_progress.grid(row=1, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
+        enhanced_progress = EnhancedProgressWidget(progress_frame, task_id)
+        enhanced_progress.grid(row=0, column=0, sticky="ew")
         
         # Create progress tracker
         tracker = progress_manager.create_tracker(task_id)
@@ -316,62 +368,80 @@ class DownloadTab:
         # Store references to update later. If a placeholder already exists (pre-registered
         # in _add_urls_to_queue), update it instead of overwriting to avoid races.
         existing = self.parent_app.download_tasks.get(task_id, {})
+        # Actions section at bottom of card
+        actions_frame = ctk.CTkFrame(task_frame, fg_color="transparent")
+        actions_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=12, pady=(0, 12))
+        actions_frame.grid_columnconfigure(0, weight=1)
+        
+        # Control buttons with card-appropriate styling
+        button_container = ctk.CTkFrame(actions_frame, fg_color="transparent")
+        button_container.grid(row=0, column=1, sticky="e")
+        
+        # Primary action button (Pause/Resume toggle) - larger and more prominent
+        pause_resume_button = ctk.CTkButton(
+            button_container,
+            text="⏸ Pause",
+            command=lambda tid=task_id: self.parent_app.toggle_pause_resume(tid),
+            width=90,
+            height=32,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            corner_radius=8
+        )
+        pause_resume_button.grid(row=0, column=0, padx=(0, 8))
+        
+        # Secondary action button (Cancel) - distinctive styling
+        cancel_button = ctk.CTkButton(
+            button_container,
+            text="✕",
+            command=lambda tid=task_id: self.parent_app.cancel_download(tid),
+            width=32,
+            height=32,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#f44336",
+            hover_color="#d32f2f",
+            corner_radius=8
+        )
+        cancel_button.grid(row=0, column=1, padx=(0, 8))
+        
+        # Context menu button for advanced actions - subtle styling
+        context_button = ctk.CTkButton(
+            button_container,
+            text="⋯",
+            command=lambda tid=task_id: self.parent_app.show_task_context_menu(tid, button_container),
+            width=32,
+            height=32,
+            font=ctk.CTkFont(size=16),
+            fg_color="transparent",
+            text_color=("gray40", "gray60"),
+            hover_color=("gray90", "gray20"),
+            corner_radius=8,
+            border_width=1,
+            border_color=("gray60", "gray40")
+        )
+        context_button.grid(row=0, column=2)
+        
+        # Update task dictionary with all references
         self.parent_app.download_tasks[task_id] = {
             'frame': task_frame,
+            'header_frame': header_frame,
+            'progress_frame': progress_frame,
+            'actions_frame': actions_frame,
             'label': task_label,
+            'status_indicator': status_indicator,
             'progress_bar': enhanced_progress.progress_bar,  # For backward compatibility
             'enhanced_progress': enhanced_progress,
             'tracker': tracker,
-            'status_label': existing.get('status_label'),  # Might not exist; keep None
+            'status_label': status_label,
             'url': existing.get('url', url), # Preserve original URL if set
             'stop_event': existing.get('stop_event', threading.Event()), # Per-task stop event
             'pause_event': existing.get('pause_event', threading.Event()), # Per-task pause event
-            'cancel_button': existing.get('cancel_button'),
-            'pause_button': existing.get('pause_button'),
-            'resume_button': existing.get('resume_button')
+            'pause_resume_button': pause_resume_button,
+            'cancel_button': cancel_button,
+            'context_button': context_button,
+            # Legacy references for compatibility
+            'pause_button': pause_resume_button,
+            'resume_button': pause_resume_button
         }
-        # Simplified Control Buttons Frame - Primary actions only
-        button_frame = ctk.CTkFrame(task_frame, fg_color="transparent")
-        button_frame.grid(row=0, column=2, padx=5, pady=2, sticky="e")
-        
-        # Primary action button (Pause/Resume toggle)
-        pause_resume_button = ctk.CTkButton(
-            button_frame,
-            text="⏸ Pause",
-            command=lambda tid=task_id: self.parent_app.toggle_pause_resume(tid),
-            width=80,
-            font=ctk.CTkFont(size=11)
-        )
-        pause_resume_button.grid(row=0, column=0, padx=2, pady=0)
-        self.parent_app.download_tasks[task_id]['pause_resume_button'] = pause_resume_button
-        
-        # Secondary action button (Cancel)
-        cancel_button = ctk.CTkButton(
-            button_frame,
-            text="✕",
-            command=lambda tid=task_id: self.parent_app.cancel_download(tid),
-            width=30,
-            font=ctk.CTkFont(size=12),
-            fg_color="#f44336",
-            hover_color="#d32f2f"
-        )
-        cancel_button.grid(row=0, column=1, padx=2, pady=0)
-        self.parent_app.download_tasks[task_id]['cancel_button'] = cancel_button
-        
-        # Context menu button for advanced actions (move up/down)
-        context_button = ctk.CTkButton(
-            button_frame,
-            text="⋯",
-            command=lambda tid=task_id: self.parent_app.show_task_context_menu(tid, button_frame),
-            width=30,
-            font=ctk.CTkFont(size=14)
-        )
-        context_button.grid(row=0, column=2, padx=2, pady=0)
-        self.parent_app.download_tasks[task_id]['context_button'] = context_button
-        
-        # Store legacy button references for compatibility (but they're combined now)
-        self.parent_app.download_tasks[task_id]['pause_button'] = pause_resume_button
-        self.parent_app.download_tasks[task_id]['resume_button'] = pause_resume_button  # Same button
 
     def clear_gui(self):
         """Clear the GUI input fields."""
