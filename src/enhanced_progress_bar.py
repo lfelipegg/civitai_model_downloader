@@ -127,61 +127,81 @@ class DetailedStatsDisplay(ctk.CTkFrame):
         # Create stats labels in a 2-column layout
         self.stats_labels = {}
         
-        # Row 0: Download info
+        # Simplified stats focusing on user-relevant information
+        # Row 0: Essential download progress
         self.stats_labels['downloaded'] = ctk.CTkLabel(
-            self, text="Downloaded: 0 B / 0 B (0%)", 
-            font=ctk.CTkFont(size=11), anchor="w"
+            self, text="Downloaded: 0 B / 0 B",
+            font=ctk.CTkFont(size=11, weight="bold"), anchor="w"
         )
         self.stats_labels['downloaded'].grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=2)
         
-        # Row 1: Speed info
-        self.stats_labels['current_speed'] = ctk.CTkLabel(
-            self, text="Current: 0 B/s", 
-            font=ctk.CTkFont(size=10), anchor="w"
-        )
-        self.stats_labels['current_speed'].grid(row=1, column=0, sticky="ew", padx=5, pady=1)
-        
-        self.stats_labels['average_speed'] = ctk.CTkLabel(
-            self, text="Average: 0 B/s", 
-            font=ctk.CTkFont(size=10), anchor="w"
-        )
-        self.stats_labels['average_speed'].grid(row=1, column=1, sticky="ew", padx=5, pady=1)
-        
-        # Row 2: Time info
-        self.stats_labels['elapsed_time'] = ctk.CTkLabel(
-            self, text="Elapsed: 0s", 
-            font=ctk.CTkFont(size=10), anchor="w"
-        )
-        self.stats_labels['elapsed_time'].grid(row=2, column=0, sticky="ew", padx=5, pady=1)
-        
+        # Row 1: Time estimates (most important to users)
         self.stats_labels['eta'] = ctk.CTkLabel(
-            self, text="ETA: Unknown", 
-            font=ctk.CTkFont(size=10), anchor="w"
+            self, text="Time remaining: Unknown",
+            font=ctk.CTkFont(size=11, weight="bold"), anchor="w", text_color="#2196F3"
         )
-        self.stats_labels['eta'].grid(row=2, column=1, sticky="ew", padx=5, pady=1)
+        self.stats_labels['eta'].grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=2)
         
-        # Row 3: Queue info (if available)
-        self.stats_labels['queue_info'] = ctk.CTkLabel(
-            self, text="", 
+        # Row 2: Current speed (simplified, no average to reduce clutter)
+        self.stats_labels['current_speed'] = ctk.CTkLabel(
+            self, text="Speed: 0 B/s",
             font=ctk.CTkFont(size=10), anchor="w"
         )
-        self.stats_labels['queue_info'].grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=1)
+        self.stats_labels['current_speed'].grid(row=2, column=0, sticky="ew", padx=5, pady=1)
+        
+        # Row 2: Elapsed time
+        self.stats_labels['elapsed_time'] = ctk.CTkLabel(
+            self, text="Elapsed: 0s",
+            font=ctk.CTkFont(size=10), anchor="w"
+        )
+        self.stats_labels['elapsed_time'].grid(row=2, column=1, sticky="ew", padx=5, pady=1)
+        
+        # Hidden by default: Advanced metrics (average speed, queue info)
+        self.stats_labels['average_speed'] = ctk.CTkLabel(
+            self, text="Average: 0 B/s",
+            font=ctk.CTkFont(size=9), anchor="w", text_color="gray"
+        )
+        self.stats_labels['average_speed'].grid(row=3, column=0, sticky="ew", padx=5, pady=1)
+        
+        self.stats_labels['queue_info'] = ctk.CTkLabel(
+            self, text="",
+            font=ctk.CTkFont(size=9), anchor="w", text_color="gray"
+        )
+        self.stats_labels['queue_info'].grid(row=3, column=1, sticky="ew", padx=5, pady=1)
+        
+        # Initially hide advanced metrics
+        self.stats_labels['average_speed'].grid_remove()
+        self.stats_labels['queue_info'].grid_remove()
     
     def update_stats(self, formatted_stats: Dict[str, str]):
         """Update display with formatted statistics"""
         for key, value in formatted_stats.items():
             if key in self.stats_labels:
-                # Apply color coding for better readability
-                text_color = "gray"  # Default color instead of None
-                if key == 'current_speed' and 'MB/s' in value:
-                    text_color = "green"
-                elif key == 'eta' and value != "Unknown":
-                    text_color = "blue"
+                # Improved formatting and color coding
+                text_color = None  # Use default color
+                display_text = value
                 
-                self.stats_labels[key].configure(
-                    text=f"{key.replace('_', ' ').title()}: {value}",
-                    text_color=text_color
-                )
+                if key == 'downloaded':
+                    display_text = f"Downloaded: {value}"
+                elif key == 'eta':
+                    display_text = f"Time remaining: {value}"
+                    text_color = "#2196F3" if value != "Unknown" else "gray"
+                elif key == 'current_speed':
+                    display_text = f"Speed: {value}"
+                    text_color = "#4CAF50" if 'MB/s' in value else None
+                elif key == 'elapsed_time':
+                    display_text = f"Elapsed: {value}"
+                elif key == 'average_speed':
+                    display_text = f"Avg: {value}"
+                    text_color = "gray"
+                elif key == 'queue_info' and value:
+                    display_text = f"Queue: {value}"
+                    text_color = "gray"
+                
+                if text_color:
+                    self.stats_labels[key].configure(text=display_text, text_color=text_color)
+                else:
+                    self.stats_labels[key].configure(text=display_text)
     
     def clear_stats(self):
         """Clear all statistics"""
@@ -222,29 +242,62 @@ class EnhancedProgressWidget(ctk.CTkFrame):
         
         # Collapsible stats (starts collapsed for space)
         self.stats_expanded = False
+        self.details_expanded = False
+        
+        # Main toggle for all detailed stats
         self.toggle_button = ctk.CTkButton(
             self,
-            text="▼ Details",
+            text="▼ Show Details",
             command=self.toggle_stats,
-            width=80,
-            height=20,
+            width=100,
+            height=22,
             font=ctk.CTkFont(size=10)
         )
         self.toggle_button.grid(row=2, column=0, sticky="e", padx=5, pady=2)
         
-        # Initially hide detailed stats
+        # Advanced details toggle (within detailed stats)
+        self.advanced_toggle_button = ctk.CTkButton(
+            self.stats_display,
+            text="▼ Advanced",
+            command=self.toggle_advanced_details,
+            width=80,
+            height=18,
+            font=ctk.CTkFont(size=9)
+        )
+        self.advanced_toggle_button.grid(row=4, column=0, columnspan=2, sticky="e", padx=5, pady=1)
+        
+        # Initially hide detailed stats and advanced toggle
         self.stats_display.grid_remove()
+        self.advanced_toggle_button.grid_remove()
     
     def toggle_stats(self):
         """Toggle detailed statistics visibility"""
         if self.stats_expanded:
             self.stats_display.grid_remove()
-            self.toggle_button.configure(text="▼ Details")
+            self.advanced_toggle_button.grid_remove()
+            self.toggle_button.configure(text="▼ Show Details")
             self.stats_expanded = False
+            self.details_expanded = False
         else:
             self.stats_display.grid(row=1, column=0, sticky="ew", padx=5, pady=2)
-            self.toggle_button.configure(text="▲ Hide")
+            self.advanced_toggle_button.grid(row=4, column=0, columnspan=2, sticky="e", padx=5, pady=1)
+            self.toggle_button.configure(text="▲ Hide Details")
             self.stats_expanded = True
+    
+    def toggle_advanced_details(self):
+        """Toggle advanced statistics visibility"""
+        if self.details_expanded:
+            # Hide advanced details
+            self.stats_display.stats_labels['average_speed'].grid_remove()
+            self.stats_display.stats_labels['queue_info'].grid_remove()
+            self.advanced_toggle_button.configure(text="▼ Advanced")
+            self.details_expanded = False
+        else:
+            # Show advanced details
+            self.stats_display.stats_labels['average_speed'].grid(row=3, column=0, sticky="ew", padx=5, pady=1)
+            self.stats_display.stats_labels['queue_info'].grid(row=3, column=1, sticky="ew", padx=5, pady=1)
+            self.advanced_toggle_button.configure(text="▲ Hide Advanced")
+            self.details_expanded = True
     
     def update_from_tracker(self, stats: ProgressStats):
         """Update widget from progress tracker stats"""

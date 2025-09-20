@@ -196,21 +196,8 @@ class App(ctk.CTk):
                     else:
                         task['progress_bar'].set(0)
                 
-                # Update main speed/remaining labels with enhanced formatting
-                if 'tracker' in task:
-                    formatted_stats = task['tracker'].get_formatted_stats()
-                    self.speed_label.configure(text=f"Speed: {formatted_stats.get('current_speed', '0 B/s')}")
-                    self.remaining_label.configure(text=f"ETA: {formatted_stats.get('eta', 'Unknown')}")
-                else:
-                    # Fallback formatting
-                    self.speed_label.configure(text=f"Speed: {speed / 1024:.2f} KB/s")
-                    if speed > 0 and total_size > 0:
-                        remaining_bytes = total_size - bytes_downloaded
-                        remaining_time_sec = remaining_bytes / speed
-                        mins, secs = divmod(remaining_time_sec, 60)
-                        self.remaining_label.configure(text=f"Remaining: {int(mins)}m {int(secs)}s")
-                    else:
-                        self.remaining_label.configure(text="Remaining: Calculating...")
+                # Global progress labels removed - progress is shown per-task in enhanced widgets
+                # No need to update global labels anymore
                     
         except Exception as e:
             print(f"Error applying progress update: {e}")
@@ -265,13 +252,7 @@ class App(ctk.CTk):
         self.clear_button = ctk.CTkButton(self.download_tab, text="Clear/Reset GUI", command=self.clear_gui)
         self.clear_button.grid(row=8, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
 
-        # Download Stats Labels
-        self.progress_label = ctk.CTkLabel(self.download_tab, text="Progress: N/A")
-        self.progress_label.grid(row=2, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
-        self.speed_label = ctk.CTkLabel(self.download_tab, text="Speed: N/A")
-        self.speed_label.grid(row=3, column=0, columnspan=2, padx=10, pady=(0, 0), sticky="w")
-        self.remaining_label = ctk.CTkLabel(self.download_tab, text="Remaining: N/A")
-        self.remaining_label.grid(row=4, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="w")
+        # Global progress labels removed - individual task progress is shown in enhanced progress widgets
 
 
         # Download Queue Display
@@ -492,35 +473,48 @@ class App(ctk.CTk):
             'pause_button': existing.get('pause_button'),
             'resume_button': existing.get('resume_button')
         }
-        # Control Buttons Frame
+        # Simplified Control Buttons Frame - Primary actions only
         button_frame = ctk.CTkFrame(task_frame, fg_color="transparent")
         button_frame.grid(row=0, column=2, padx=5, pady=2, sticky="e")
-        button_frame.grid_columnconfigure(0, weight=1) # For pause
-        button_frame.grid_columnconfigure(1, weight=1) # For resume
-        button_frame.grid_columnconfigure(2, weight=1) # For cancel
-        button_frame.grid_columnconfigure(3, weight=1) # For up
-        button_frame.grid_columnconfigure(4, weight=1) # For down
-        # Add Pause Button
-        pause_button = ctk.CTkButton(button_frame, text="Pause", command=lambda tid=task_id: self.pause_download(tid))
-        pause_button.grid(row=0, column=0, padx=2, pady=0, sticky="ew")
-        self.download_tasks[task_id]['pause_button'] = pause_button
-        # Add Resume Button (initially disabled)
-        resume_button = ctk.CTkButton(button_frame, text="Resume", command=lambda tid=task_id: self.resume_download(tid), state="disabled")
-        resume_button.grid(row=0, column=1, padx=2, pady=0, sticky="ew")
-        self.download_tasks[task_id]['resume_button'] = resume_button
         
-        # Add Cancel Button
-        cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=lambda tid=task_id: self.cancel_download(tid))
-        cancel_button.grid(row=0, column=2, padx=2, pady=0, sticky="ew")
+        # Primary action button (Pause/Resume toggle)
+        pause_resume_button = ctk.CTkButton(
+            button_frame,
+            text="⏸ Pause",
+            command=lambda tid=task_id: self.toggle_pause_resume(tid),
+            width=80,
+            font=ctk.CTkFont(size=11)
+        )
+        pause_resume_button.grid(row=0, column=0, padx=2, pady=0)
+        self.download_tasks[task_id]['pause_resume_button'] = pause_resume_button
+        
+        # Secondary action button (Cancel)
+        cancel_button = ctk.CTkButton(
+            button_frame,
+            text="✕",
+            command=lambda tid=task_id: self.cancel_download(tid),
+            width=30,
+            font=ctk.CTkFont(size=12),
+            fg_color="#f44336",
+            hover_color="#d32f2f"
+        )
+        cancel_button.grid(row=0, column=1, padx=2, pady=0)
         self.download_tasks[task_id]['cancel_button'] = cancel_button
-        # Add Move Up Button
-        move_up_button = ctk.CTkButton(button_frame, text="▲", command=lambda tid=task_id: self.move_task_up(tid), width=30)
-        move_up_button.grid(row=0, column=3, padx=2, pady=0, sticky="ew")
-        self.download_tasks[task_id]['move_up_button'] = move_up_button
-        # Add Move Down Button
-        move_down_button = ctk.CTkButton(button_frame, text="▼", command=lambda tid=task_id: self.move_task_down(tid), width=30)
-        move_down_button.grid(row=0, column=4, padx=2, pady=0, sticky="ew")
-        self.download_tasks[task_id]['move_down_button'] = move_down_button
+        
+        # Context menu button for advanced actions (move up/down)
+        context_button = ctk.CTkButton(
+            button_frame,
+            text="⋯",
+            command=lambda tid=task_id: self.show_task_context_menu(tid, button_frame),
+            width=30,
+            font=ctk.CTkFont(size=14)
+        )
+        context_button.grid(row=0, column=2, padx=2, pady=0)
+        self.download_tasks[task_id]['context_button'] = context_button
+        
+        # Store legacy button references for compatibility (but they're combined now)
+        self.download_tasks[task_id]['pause_button'] = pause_resume_button
+        self.download_tasks[task_id]['resume_button'] = pause_resume_button  # Same button
     
     def cancel_download(self, task_id):
         if task_id in self.download_tasks:
@@ -580,6 +574,54 @@ class App(ctk.CTk):
             if task['resume_button']:
                 task['resume_button'].configure(state="disabled")
             self.log_message(f"Resume requested for task: {task['url']}")
+    
+    def toggle_pause_resume(self, task_id):
+        """Toggle between pause and resume for a task"""
+        if task_id in self.download_tasks:
+            task = self.download_tasks[task_id]
+            button = task.get('pause_resume_button')
+            
+            if not button:
+                return
+                
+            # Check current state by examining pause event
+            if task['pause_event'].is_set():  # Currently paused
+                # Resume the task
+                self.resume_download(task_id)
+                button.configure(text="⏸ Pause")
+            else:  # Currently running
+                # Pause the task
+                self.pause_download(task_id)
+                button.configure(text="▶ Resume")
+    
+    def show_task_context_menu(self, task_id, parent_widget):
+        """Show context menu for advanced task actions"""
+        import tkinter as tk
+        
+        # Create context menu
+        context_menu = tk.Menu(self, tearoff=0)
+        context_menu.add_command(
+            label="Move Up ▲",
+            command=lambda: self.move_task_up(task_id)
+        )
+        context_menu.add_command(
+            label="Move Down ▼",
+            command=lambda: self.move_task_down(task_id)
+        )
+        context_menu.add_separator()
+        context_menu.add_command(
+            label="Remove from Queue",
+            command=lambda: self.cancel_download(task_id)
+        )
+        
+        # Show menu at cursor position
+        try:
+            x = parent_widget.winfo_rootx()
+            y = parent_widget.winfo_rooty() + parent_widget.winfo_height()
+            context_menu.post(x, y)
+        except:
+            # Fallback if positioning fails
+            context_menu.post(parent_widget.winfo_rootx(), parent_widget.winfo_rooty())
  
     def _cleanup_task_ui(self, task_id):
         # Ensure cleanup is called on the main thread to avoid race conditions
@@ -728,9 +770,7 @@ class App(ctk.CTk):
 
             # Reset main UI elements
             self.after(0, lambda: self.download_button.configure(state="normal", text="Start Download"))
-            self.after(0, lambda: self.progress_label.configure(text="Progress: N/A"))
-            self.after(0, lambda: self.speed_label.configure(text="Speed: N/A"))
-            self.after(0, lambda: self.remaining_label.configure(text="Remaining: N/A"))
+            # Global progress labels removed - no need to reset them
     def _process_download_queue(self):
         while not self.stop_event.is_set():
             task = None

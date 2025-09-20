@@ -103,13 +103,7 @@ class DownloadTab:
         self.clear_button = ctk.CTkButton(self.download_tab_frame, text="Clear/Reset GUI", command=self.clear_gui)
         self.clear_button.grid(row=8, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
 
-        # Download Stats Labels
-        self.progress_label = ctk.CTkLabel(self.download_tab_frame, text="Progress: N/A")
-        self.progress_label.grid(row=2, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
-        self.speed_label = ctk.CTkLabel(self.download_tab_frame, text="Speed: N/A")
-        self.speed_label.grid(row=3, column=0, columnspan=2, padx=10, pady=(0, 0), sticky="w")
-        self.remaining_label = ctk.CTkLabel(self.download_tab_frame, text="Remaining: N/A")
-        self.remaining_label.grid(row=4, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="w")
+        # Global progress labels removed - individual task progress is shown in enhanced progress widgets
 
 
         # Download Queue Display
@@ -336,35 +330,48 @@ class DownloadTab:
             'pause_button': existing.get('pause_button'),
             'resume_button': existing.get('resume_button')
         }
-        # Control Buttons Frame
+        # Simplified Control Buttons Frame - Primary actions only
         button_frame = ctk.CTkFrame(task_frame, fg_color="transparent")
         button_frame.grid(row=0, column=2, padx=5, pady=2, sticky="e")
-        button_frame.grid_columnconfigure(0, weight=1) # For pause
-        button_frame.grid_columnconfigure(1, weight=1) # For resume
-        button_frame.grid_columnconfigure(2, weight=1) # For cancel
-        button_frame.grid_columnconfigure(3, weight=1) # For up
-        button_frame.grid_columnconfigure(4, weight=1) # For down
-        # Add Pause Button
-        pause_button = ctk.CTkButton(button_frame, text="Pause", command=lambda tid=task_id: self.parent_app.pause_download(tid))
-        pause_button.grid(row=0, column=0, padx=2, pady=0, sticky="ew")
-        self.parent_app.download_tasks[task_id]['pause_button'] = pause_button
-        # Add Resume Button (initially disabled)
-        resume_button = ctk.CTkButton(button_frame, text="Resume", command=lambda tid=task_id: self.parent_app.resume_download(tid), state="disabled")
-        resume_button.grid(row=0, column=1, padx=2, pady=0, sticky="ew")
-        self.parent_app.download_tasks[task_id]['resume_button'] = resume_button
         
-        # Add Cancel Button
-        cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=lambda tid=task_id: self.parent_app.cancel_download(tid))
-        cancel_button.grid(row=0, column=2, padx=2, pady=0, sticky="ew")
+        # Primary action button (Pause/Resume toggle)
+        pause_resume_button = ctk.CTkButton(
+            button_frame,
+            text="⏸ Pause",
+            command=lambda tid=task_id: self.parent_app.toggle_pause_resume(tid),
+            width=80,
+            font=ctk.CTkFont(size=11)
+        )
+        pause_resume_button.grid(row=0, column=0, padx=2, pady=0)
+        self.parent_app.download_tasks[task_id]['pause_resume_button'] = pause_resume_button
+        
+        # Secondary action button (Cancel)
+        cancel_button = ctk.CTkButton(
+            button_frame,
+            text="✕",
+            command=lambda tid=task_id: self.parent_app.cancel_download(tid),
+            width=30,
+            font=ctk.CTkFont(size=12),
+            fg_color="#f44336",
+            hover_color="#d32f2f"
+        )
+        cancel_button.grid(row=0, column=1, padx=2, pady=0)
         self.parent_app.download_tasks[task_id]['cancel_button'] = cancel_button
-        # Add Move Up Button
-        move_up_button = ctk.CTkButton(button_frame, text="▲", command=lambda tid=task_id: self.parent_app.move_task_up(tid), width=30)
-        move_up_button.grid(row=0, column=3, padx=2, pady=0, sticky="ew")
-        self.parent_app.download_tasks[task_id]['move_up_button'] = move_up_button
-        # Add Move Down Button
-        move_down_button = ctk.CTkButton(button_frame, text="▼", command=lambda tid=task_id: self.parent_app.move_task_down(tid), width=30)
-        move_down_button.grid(row=0, column=4, padx=2, pady=0, sticky="ew")
-        self.parent_app.download_tasks[task_id]['move_down_button'] = move_down_button
+        
+        # Context menu button for advanced actions (move up/down)
+        context_button = ctk.CTkButton(
+            button_frame,
+            text="⋯",
+            command=lambda tid=task_id: self.parent_app.show_task_context_menu(tid, button_frame),
+            width=30,
+            font=ctk.CTkFont(size=14)
+        )
+        context_button.grid(row=0, column=2, padx=2, pady=0)
+        self.parent_app.download_tasks[task_id]['context_button'] = context_button
+        
+        # Store legacy button references for compatibility (but they're combined now)
+        self.parent_app.download_tasks[task_id]['pause_button'] = pause_resume_button
+        self.parent_app.download_tasks[task_id]['resume_button'] = pause_resume_button  # Same button
 
     def clear_gui(self):
         """Clear the GUI input fields."""
@@ -446,9 +453,7 @@ class DownloadTab:
 
             # Reset main UI elements
             self.parent_app.after(0, lambda: self.download_button.configure(state="normal", text="Start Download"))
-            self.parent_app.after(0, lambda: self.progress_label.configure(text="Progress: N/A"))
-            self.parent_app.after(0, lambda: self.speed_label.configure(text="Speed: N/A"))
-            self.parent_app.after(0, lambda: self.remaining_label.configure(text="Remaining: N/A"))
+            # Global progress labels removed - no need to reset them
 
 
 # This would be used by the main application to initialize the download tab
