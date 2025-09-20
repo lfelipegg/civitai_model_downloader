@@ -215,19 +215,7 @@ class MemoryMonitor:
             collected = gc.collect()
             print(f"Garbage collection freed {collected} objects")
             
-            # Try to clean up thumbnail cache aggressively
-            try:
-                from src.thumbnail_manager import thumbnail_manager
-                cache_size_before = thumbnail_manager.get_memory_usage()
-                thumbnail_manager.cleanup_cache(force_aggressive=True)
-                cache_size_after = thumbnail_manager.get_memory_usage()
-                freed_cache = cache_size_before - cache_size_after
-                print(f"Thumbnail cache cleanup freed {freed_cache:.1f} MB")
-            except ImportError:
-                pass
-            except Exception as e:
-                print(f"Error cleaning thumbnail cache: {e}")
-            
+            # Thumbnail cache feature disabled; skip cleanup steps.
             return True
         except Exception as e:
             print(f"Error during forced cleanup: {e}")
@@ -238,21 +226,12 @@ class MemoryMonitor:
         try:
             stats = self.get_current_stats()
             
-            # Add thumbnail cache info
-            cache_info = {}
-            try:
-                from src.thumbnail_manager import thumbnail_manager
-                cache_info = {
-                    'thumbnail_cache_mb': thumbnail_manager.get_memory_usage(),
-                    'thumbnail_cache_needs_cleanup': thumbnail_manager.should_cleanup(),
-                    'thumbnail_cache_stats': thumbnail_manager.get_cache_stats()
-                }
-            except ImportError:
-                cache_info = {
-                    'thumbnail_cache_mb': 0,
-                    'thumbnail_cache_needs_cleanup': False,
-                    'thumbnail_cache_stats': {}
-                }
+            # Thumbnail cache feature disabled; report zeros.
+            cache_info = {
+                'thumbnail_cache_mb': 0,
+                'thumbnail_cache_needs_cleanup': False,
+                'thumbnail_cache_stats': {}
+            }
             
             return {
                 'process_memory_mb': stats.process_memory_mb,

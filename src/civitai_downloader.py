@@ -357,15 +357,6 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
         except Exception as e:
             print(f"Warning: Failed to generate HTML report: {e}")
 
-        try:
-            # Add to download history
-            from src.history_manager import HistoryManager
-            history_manager = HistoryManager()
-            history_manager.add_download_entry(model_info, target_dir)
-            print(f"Added {model_name} v{model_version_name} to download history")
-        except Exception as e:
-            print(f"Warning: Failed to add to download history: {e}")
-
     # Run background tasks in separate thread to avoid blocking
     bg_thread = threading.Thread(target=background_tasks, daemon=True, name=f"bg_{model_name}_{model_version_name}")
     bg_thread.start()

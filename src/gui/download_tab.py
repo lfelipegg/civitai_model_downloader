@@ -31,8 +31,7 @@ from src.gui.utils import (
 # Import other required components
 from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded
 from src.progress_tracker import progress_manager, ProgressPhase, ProgressStats
-from src.thumbnail_manager import thumbnail_manager
-from src.enhanced_progress_bar import EnhancedProgressWidget, ThumbnailWidget
+from src.enhanced_progress_bar import EnhancedProgressWidget
 
 
 class DownloadTab:
