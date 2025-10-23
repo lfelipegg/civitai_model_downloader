@@ -33,6 +33,179 @@ def retry(exceptions, tries=4, delay=3, backoff=2):
         return f_retry
     return deco_retry
 
+def extract_primary_file_hash(model_version_data):
+    """Extract SHA256 hash from the primary file in model version data."""
+    if not model_version_data or 'files' not in model_version_data:
+        return None
+    
+    for file_info in model_version_data.get('files', []):
+        if file_info.get('primary'):
+            return file_info.get('hashes', {}).get('SHA256')
+    return None
+
+def get_model_version_data(model_version_id, hash_id=None, api_key=None):
+    """
+    Fetches model version data from Civitai API with fallback support.
+    First tries the regular API, then falls back to hash-based API if available.
+    """
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    
+    @retry(exceptions=(requests.exceptions.HTTPError, requests.exceptions.RequestException), tries=3, delay=2, backoff=2)
+    def _get_response_with_retry(url, headers):
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response
+    
+    # If hash_id is provided, use hash-based API directly
+    if hash_id:
+        endpoint = f"{CIVITAI_BASE_URL}/model-versions/by-hash/{hash_id}"
+        print(f"Fetching model version info by hash from: {endpoint}")
+        try:
+            response = _get_response_with_retry(endpoint, headers)
+            return response.json(), None
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                return None, "Unauthorized: Invalid API Key or missing authentication."
+            elif e.response.status_code == 404:
+                return None, f"Not Found: Model version with hash {hash_id} not found."
+            elif e.response.status_code == 429:
+                return None, "Too Many Requests: Rate limit exceeded. Please wait and try again."
+            else:
+                return None, f"HTTP Error: {e.response.status_code} - {e.response.reason}"
+        except requests.exceptions.RequestException as e:
+            return None, f"Network Error: Could not connect to Civitai API. {e}"
+    
+    # Try regular API first
+    endpoint = f"{CIVITAI_BASE_URL}/model-versions/{model_version_id}"
+    print(f"Fetching model version info from: {endpoint}")
+    try:
+        response = _get_response_with_retry(endpoint, headers)
+        model_version_data = response.json()
+        return model_version_data, None
+    except requests.exceptions.HTTPError as e:
+        print(f"Primary API failed with HTTP error: {e.response.status_code} - {e.response.reason}")
+        
+        # Try to fall back to hash-based API if we can get the hash
+        if e.response.status_code in [404, 500, 502, 503, 504]:  # Server errors that might benefit from hash fallback
+            print("Attempting fallback to hash-based API...")
+            
+            # For fallback, we need to try a different approach since we don't have the data yet
+            # We'll return the error and let the calling function handle the fallback if needed
+            if e.response.status_code == 401:
+                return None, "Unauthorized: Invalid API Key or missing authentication."
+            elif e.response.status_code == 404:
+                return None, f"Not Found: Model version with ID {model_version_id} not found."
+            elif e.response.status_code == 429:
+                return None, "Too Many Requests: Rate limit exceeded. Please wait and try again."
+            else:
+                return None, f"HTTP Error: {e.response.status_code} - {e.response.reason}"
+        else:
+            if e.response.status_code == 401:
+                return None, "Unauthorized: Invalid API Key or missing authentication."
+            elif e.response.status_code == 404:
+                return None, f"Not Found: Model version with ID {model_version_id} not found."
+            elif e.response.status_code == 429:
+                return None, "Too Many Requests: Rate limit exceeded. Please wait and try again."
+            else:
+                return None, f"HTTP Error: {e.response.status_code} - {e.response.reason}"
+    except requests.exceptions.RequestException as e:
+        return None, f"Network Error: Could not connect to Civitai API. {e}"
+def get_model_version_data_with_fallback(model_version_id, api_key=None, cached_model_data=None):
+    """
+    Fetches model version data from Civitai API with hash-based fallback support.
+    First tries the regular API, then falls back to hash-based API if available.
+    """
+    # First attempt with regular API
+    model_data, error = get_model_version_data(model_version_id, api_key=api_key)
+    
+    if model_data:
+        return model_data, None
+    
+    # If primary API failed, try hash-based fallback
+    print(f"Primary API failed: {error}")
+    
+    # Try to get hash from cached data or attempt to fetch it differently
+    hash_id = None
+    if cached_model_data:
+        hash_id = extract_primary_file_hash(cached_model_data)
+    
+    if hash_id:
+        print(f"Attempting hash-based fallback with hash: {hash_id}")
+        hash_data, hash_error = get_model_version_data(model_version_id, hash_id=hash_id, api_key=api_key)
+        if hash_data:
+            print("Hash-based API fallback successful!")
+            return hash_data, None
+        else:
+            print(f"Hash-based fallback also failed: {hash_error}")
+    else:
+        print("No hash available for fallback, cannot use hash-based API")
+    
+    # Both attempts failed, return original error
+    return None, error
+def get_model_version_data_with_enhanced_fallback(model_version_id, api_key=None, model_id=None):
+    """
+    Enhanced fallback that can use parent model ID when available.
+    """
+    # First attempt with regular API
+    model_data, error = get_model_version_data(model_version_id, api_key=api_key)
+    
+    if model_data:
+        return model_data, None
+    
+    # If primary API failed and we have a model_id, try to get hash from parent model
+    print(f"Primary API failed: {error}")
+    
+    if model_id:
+        print(f"Attempting to get hash from parent model ID: {model_id}")
+        hash_id = get_hash_from_model_id(model_id, model_version_id, api_key)
+        
+        if hash_id:
+            print(f"Found hash from parent model: {hash_id}")
+            print(f"Attempting hash-based fallback with hash: {hash_id}")
+            hash_data, hash_error = get_model_version_data(model_version_id, hash_id=hash_id, api_key=api_key)
+            if hash_data:
+                print("Hash-based API fallback successful!")
+                return hash_data, None
+            else:
+                print(f"Hash-based fallback also failed: {hash_error}")
+    
+    # Both attempts failed, return original error
+    return None, error
+
+def get_hash_from_model_id(model_id, target_version_id, api_key):
+    """
+    Gets the hash for a specific model version by fetching the parent model info.
+    """
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        
+        @retry(exceptions=(requests.exceptions.HTTPError, requests.exceptions.RequestException), tries=2, delay=1, backoff=1.5)
+        def _get_model_with_retry(url, headers):
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            return response
+        
+        endpoint = f"{CIVITAI_BASE_URL}/models/{model_id}"
+        print(f"Fetching parent model info from: {endpoint}")
+        
+        response = _get_model_with_retry(endpoint, headers)
+        model_info = response.json()
+        
+        # Find the specific version and extract its hash
+        if model_info and model_info.get('modelVersions'):
+            for version in model_info['modelVersions']:
+                if str(version['id']) == str(target_version_id):
+                    return extract_primary_file_hash(version)
+        
+        print(f"Could not find version {target_version_id} in parent model {model_id}")
+        return None
+        
+    except Exception as e:
+        print(f"Error getting hash from parent model {model_id}: {e}")
+        return None
+
+
+
 def get_model_info_from_url(url, api_key):
     """
     Extracts model information from a Civitai URL.
@@ -44,35 +217,23 @@ def get_model_info_from_url(url, api_key):
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     model_version_id = None
+    model_id = None
 
     if model_version_id_query_match:
         model_version_id = model_version_id_query_match.group(1)
     elif model_version_id_path_match:
         model_version_id = model_version_id_path_match.group(1)
+    
+    # Extract model ID if present in URL
+    if model_id_match:
+        model_id = model_id_match.group(1)
 
     if model_version_id:
-        endpoint = f"{CIVITAI_BASE_URL}/model-versions/{model_version_id}"
-        print(f"Fetching specific model version info from: {endpoint}")
-        try:
-            @retry(exceptions=(requests.exceptions.HTTPError, requests.exceptions.RequestException), tries=3, delay=2, backoff=2)
-            def _get_response_with_retry(url, headers):
-                response = requests.get(url, headers=headers)
-                response.raise_for_status()
-                return response
-
-            response = _get_response_with_retry(endpoint, headers)
-            return response.json(), None
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 401:
-                return None, "Unauthorized: Invalid API Key or missing authentication."
-            elif e.response.status_code == 404:
-                return None, f"Not Found: Model version with ID {model_version_id} not found."
-            elif e.response.status_code == 429:
-                return None, "Too Many Requests: Rate limit exceeded. Please wait and try again."
-            else:
-                return None, f"HTTP Error: {e.response.status_code} - {e.response.reason}"
-        except requests.exceptions.RequestException as e:
-            return None, f"Network Error: Could not connect to Civitai API. {e}"
+        # Use the enhanced fallback that can utilize parent model ID
+        if model_id:
+            return get_model_version_data_with_enhanced_fallback(model_version_id, api_key=api_key, model_id=model_id)
+        else:
+            return get_model_version_data_with_fallback(model_version_id, api_key=api_key)
     elif model_id_match:
         model_id = model_id_match.group(1)
         try:

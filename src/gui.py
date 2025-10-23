@@ -207,38 +207,123 @@ class App(ctk.CTk):
         self.download_tab.grid_columnconfigure(1, weight=1)
         self.download_tab.grid_rowconfigure(4, weight=1)
 
-        # Input Frame
+        # Main Input Frame with Progressive Disclosure
         self.input_frame = ctk.CTkFrame(self.download_tab)
         self.input_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
         self.input_frame.grid_columnconfigure(1, weight=1)
 
-        # URL Input
-        self.url_label = ctk.CTkLabel(self.input_frame, text="Civitai URL:")
-        self.url_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        self.url_entry = ctk.CTkTextbox(self.input_frame, height=100, width=400) # Increased height for multiple URLs
-        self.url_entry.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
-        self.browse_button = ctk.CTkButton(self.input_frame, text="Browse .txt", command=self.browse_txt_file)
-        self.browse_button.grid(row=0, column=2, padx=10, pady=10, sticky="e")
+        # Essential Information Section (Always Visible)
+        # URL Input - Most important field, prominently displayed
+        self.url_label = ctk.CTkLabel(
+            self.input_frame,
+            text="Download URLs:",
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.url_label.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
+        
+        self.url_entry = ctk.CTkTextbox(self.input_frame, height=80, width=400)
+        self.url_entry.grid(row=0, column=1, padx=10, pady=(10, 5), sticky="nsew")
+        self.url_entry.insert("1.0", "Paste Civitai URLs here (one per line)")
+        
+        # Quick action buttons
+        quick_actions_frame = ctk.CTkFrame(self.input_frame, fg_color="transparent")
+        quick_actions_frame.grid(row=0, column=2, padx=10, pady=(10, 5), sticky="ne")
+        
+        self.browse_button = ctk.CTkButton(
+            quick_actions_frame,
+            text="📁 Load File",
+            command=self.browse_txt_file,
+            width=100,
+            height=28
+        )
+        self.browse_button.grid(row=0, column=0, pady=(0, 4))
+        
+        self.clear_urls_button = ctk.CTkButton(
+            quick_actions_frame,
+            text="🗑 Clear",
+            command=self.clear_urls,
+            width=100,
+            height=28,
+            fg_color="transparent",
+            text_color=("gray40", "gray60"),
+            hover_color=("gray90", "gray20")
+        )
+        self.clear_urls_button.grid(row=1, column=0)
 
-        # API Key Input
-        # Move API key and download path labels down due to increased URL entry height
-        self.api_key_label = ctk.CTkLabel(self.input_frame, text="Civitai API Key:")
-        self.api_key_label.grid(row=1, column=0, padx=10, pady=(10, 5), sticky="w")
-        self.api_key_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Enter your Civitai API Key (optional)", show="*")
-        self.api_key_entry.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
+        # Download Path - Essential but secondary
+        self.download_path_label = ctk.CTkLabel(self.input_frame, text="Download Folder:")
+        self.download_path_label.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="w")
+        
+        download_path_frame = ctk.CTkFrame(self.input_frame, fg_color="transparent")
+        download_path_frame.grid(row=1, column=1, columnspan=2, padx=10, pady=(5, 10), sticky="ew")
+        download_path_frame.grid_columnconfigure(0, weight=1)
+        
+        self.download_path_entry = ctk.CTkEntry(
+            download_path_frame,
+            placeholder_text="Select download directory"
+        )
+        self.download_path_entry.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+        
+        self.browse_path_button = ctk.CTkButton(
+            download_path_frame,
+            text="Browse",
+            command=self.browse_download_path,
+            width=80
+        )
+        self.browse_path_button.grid(row=0, column=1)
 
-        # Download Path Input
-        self.download_path_label = ctk.CTkLabel(self.input_frame, text="Download Path:")
-        self.download_path_label.grid(row=2, column=0, padx=10, pady=(5, 10), sticky="w")
-        self.download_path_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Select download directory")
-        self.download_path_entry.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
-        self.browse_path_button = ctk.CTkButton(self.input_frame, text="Browse Dir", command=self.browse_download_path)
-        self.browse_path_button.grid(row=2, column=2, padx=10, pady=10, sticky="e")
+        # Advanced Settings Section (Collapsible)
+        self.advanced_expanded = False
+        self.advanced_toggle_button = ctk.CTkButton(
+            self.input_frame,
+            text="▼ Advanced Settings",
+            command=self.toggle_advanced_settings,
+            width=150,
+            height=24,
+            font=ctk.CTkFont(size=11),
+            fg_color="transparent",
+            text_color=("gray40", "gray60"),
+            hover_color=("gray90", "gray20")
+        )
+        self.advanced_toggle_button.grid(row=2, column=0, padx=10, pady=(0, 5), sticky="w")
 
-        # Load environment variables
+        # Advanced Settings Frame (Initially Hidden)
+        self.advanced_frame = ctk.CTkFrame(self.input_frame, fg_color=("gray95", "gray10"))
+        self.advanced_frame.grid_columnconfigure(1, weight=1)
+        
+        # API Key Input (Advanced Setting)
+        self.api_key_label = ctk.CTkLabel(
+            self.advanced_frame,
+            text="API Key:",
+            font=ctk.CTkFont(size=11)
+        )
+        self.api_key_label.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
+        
+        self.api_key_entry = ctk.CTkEntry(
+            self.advanced_frame,
+            placeholder_text="Optional: Enter Civitai API Key for private models",
+            show="*",
+            height=28
+        )
+        self.api_key_entry.grid(row=0, column=1, padx=10, pady=(10, 5), sticky="ew")
+        
+        # Help text for API key
+        self.api_help_label = ctk.CTkLabel(
+            self.advanced_frame,
+            text="💡 API key enables downloading private models and increases rate limits",
+            font=ctk.CTkFont(size=10),
+            text_color="gray"
+        )
+        self.api_help_label.grid(row=1, column=1, padx=10, pady=(0, 10), sticky="w")
+
+        # Load environment variables with smart defaults
         load_dotenv()
         self.api_key_entry.insert(0, os.getenv("CIVITAI_API_KEY", ""))
-        self.download_path_entry.insert(0, os.getenv("DOWNLOAD_PATH", os.getcwd()))
+        default_path = os.getenv("DOWNLOAD_PATH", os.path.join(os.getcwd(), "downloads"))
+        self.download_path_entry.insert(0, default_path)
+        
+        # Initially hide advanced settings
+        self.advanced_frame.grid_remove()
 
         # Download Button
         self.download_button = ctk.CTkButton(self.download_tab, text="Start Download", command=self.start_download_thread)
