@@ -17,7 +17,22 @@ def generate_html_report(model_info, output_dir):
     base_model = model_info.get('baseModel', 'N/A')
     trained_words = model_info.get('trainedWords', [])
     usage_tips = model_info.get('usageTips', 'N/A')
-    description = model_info.get('description', 'No description provided.')
+    description = (
+        model_info.get('description')
+        or model_info.get('model', {}).get('description')
+    )
+    if not description:
+        description_path = os.path.join(output_dir, "description.md")
+        if os.path.exists(description_path):
+            try:
+                with open(description_path, 'r', encoding='utf-8') as f:
+                    loaded_description = f.read().strip()
+                if loaded_description:
+                    description = loaded_description
+            except OSError as e:
+                print(f"Warning: Unable to load description from {description_path}: {e}")
+    if not description:
+        description = 'No description provided.'
 
     html_content = f"""
 <!DOCTYPE html>

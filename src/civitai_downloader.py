@@ -5,8 +5,13 @@ import time
 import hashlib
 from functools import wraps
 import shutil
+from urllib.parse import urlparse, unquote
 
 CIVITAI_BASE_URL = "https://civitai.com/api/v1"
+DESCRIPTION_MEDIA_PATTERN = re.compile(
+    r'https?://[^\s>"\'\)\]]+?\.(?:jpe?g|png|gif|webp|mp4|mov|avi|wmv|flv|webm)(?=[\s>"\'\)\]]|$)',
+    re.IGNORECASE
+)
 
 def retry(exceptions, tries=4, delay=3, backoff=2):
     """
@@ -445,7 +450,7 @@ def check_disk_space(path, required_bytes):
 
 def download_civitai_model(model_info, download_base_path, api_key, progress_callback=None, stop_event=None, pause_event=None):
     """
-    Downloads a Civitai model, its images, and saves metadata.
+    Downloads a Civitai model, its images, description assets, and saves metadata.
     Creates the directory structure: ./{{base_model}}/{{type}}/{{Model_name}}/{{Model_version}}/
     """
     model_name = model_info['model']['name']
@@ -504,8 +509,21 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
             if download_error:
                 print(f"Warning: Failed to download image {image_name}: {download_error}")
 
+    # Ensure description text is present before saving metadata
+    description_text = ensure_model_description(model_info, api_key=api_key)
+
     # Save metadata
     save_metadata(model_info, os.path.join(target_dir, "metadata.json"))
+
+    # Persist description text and any embedded media from the post
+    save_description_and_assets(
+        model_info,
+        target_dir,
+        description_text=description_text,
+        api_key=api_key,
+        stop_event=stop_event,
+        pause_event=pause_event
+    )
 
     # Generate HTML report and add to history in background to avoid UI blocking
     import threading
@@ -527,3 +545,155 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
 def sanitize_filename(name):
     """Sanitizes a string to be used as a filename or directory name."""
     return re.sub(r'[\\/:*?"<>|]', '_', name)
+
+def ensure_model_description(model_info, api_key=None):
+    """
+    Guarantees that model_info has a description by fetching it from the parent model if missing.
+    Returns the resolved description or None.
+    """
+    description = (
+        model_info.get('description')
+        or model_info.get('model', {}).get('description')
+    )
+
+    if description:
+        return description
+
+    fetched_description = fetch_model_description(model_info, api_key=api_key)
+    if fetched_description:
+        model_info['description'] = fetched_description
+        return fetched_description
+
+    return None
+
+def fetch_model_description(model_info, api_key=None):
+    """
+    Fetches a model description from the Civitai API using the parent model ID.
+    Attempts to match the specific model version first before falling back to any available description.
+    """
+    model_id = (
+        model_info.get('modelId')
+        or model_info.get('model', {}).get('id')
+    )
+    if not model_id:
+        return None
+
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    endpoint = f"{CIVITAI_BASE_URL}/models/{model_id}"
+
+    @retry(exceptions=(requests.exceptions.HTTPError, requests.exceptions.RequestException), tries=2, delay=1.5, backoff=2)
+    def _get_model_data(url, headers):
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response
+
+    try:
+        response = _get_model_data(endpoint, headers)
+        model_data = response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Warning: Failed to fetch description for model ID {model_id}: {e}")
+        return None
+
+    candidates = []
+    if model_data.get('description'):
+        candidates.append(model_data['description'])
+
+    target_version_id = (
+        model_info.get('id')
+        or model_info.get('modelVersionId')
+        or model_info.get('model', {}).get('modelVersions', [{}])[0].get('id')
+    )
+
+    for version in model_data.get('modelVersions', []):
+        if version.get('id') == target_version_id and version.get('description'):
+            candidates.append(version['description'])
+
+    for version in model_data.get('modelVersions', []):
+        if version.get('description'):
+            candidates.append(version['description'])
+
+    posts = model_data.get('posts') or []
+    for post in posts:
+        content = post.get('content')
+        if content:
+            candidates.append(content)
+
+    for desc in candidates:
+        if desc:
+            return desc
+
+    return None
+
+def save_description_and_assets(model_info, target_dir, description_text=None, api_key=None, stop_event=None, pause_event=None):
+    """
+    Persists the model description text and downloads any media referenced inside it.
+    The description text is saved as Markdown to preserve formatting.
+    """
+    description = (
+        description_text
+        or model_info.get('description')
+        or model_info.get('model', {}).get('description')
+    )
+
+    if not description and api_key:
+        description = fetch_model_description(model_info, api_key=api_key)
+        if description:
+            model_info['description'] = description
+
+    if not description:
+        return
+
+    description_path = os.path.join(target_dir, "description.md")
+    try:
+        with open(description_path, 'w', encoding='utf-8') as f:
+            f.write(description)
+        print(f"Saved model description to {description_path}")
+    except OSError as e:
+        print(f"Warning: Failed to save description text: {e}")
+
+    media_urls = DESCRIPTION_MEDIA_PATTERN.findall(description)
+    if not media_urls:
+        return
+
+    assets_dir = os.path.join(target_dir, "description_images")
+    os.makedirs(assets_dir, exist_ok=True)
+
+    seen_urls = set()
+    for index, original_url in enumerate(media_urls):
+        url = original_url.strip()
+        if not url:
+            continue
+
+        lower_url = url.lower()
+        if lower_url in seen_urls:
+            continue
+        seen_urls.add(lower_url)
+
+        if stop_event and stop_event.is_set():
+            print("Description media download interrupted by stop request.")
+            break
+
+        parsed = urlparse(url)
+        filename = os.path.basename(parsed.path)
+        filename = unquote(filename)
+        filename = sanitize_filename(filename)
+
+        if not filename:
+            ext = os.path.splitext(parsed.path)[1]
+            filename = f"description_asset_{index}{ext if ext else '.jpg'}"
+        elif not os.path.splitext(filename)[1]:
+            ext = os.path.splitext(parsed.path)[1]
+            if ext:
+                filename = f"{filename}{ext}"
+
+        destination_path = os.path.join(assets_dir, filename)
+        download_error = download_file(
+            url,
+            destination_path,
+            api_key,
+            progress_callback=None,
+            stop_event=stop_event,
+            pause_event=pause_event
+        )
+        if download_error:
+            print(f"Warning: Failed to download description media from {url}: {download_error}")
