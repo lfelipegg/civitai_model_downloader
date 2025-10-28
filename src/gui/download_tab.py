@@ -1,4 +1,4 @@
-"""
+﻿"""
 Download tab component for the Civitai Model Downloader GUI.
 
 This module contains all the download tab related functionality.
@@ -10,7 +10,8 @@ from tkinter import filedialog, messagebox
 import os
 import threading
 import urllib.parse
-import queue
+import uuid
+import re
 
 # Import utilities
 from src.gui.utils import (
@@ -29,7 +30,7 @@ from src.gui.utils import (
 )
 
 # Import other required components
-from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded
+from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded, get_model_with_versions
 from src.progress_tracker import progress_manager, ProgressPhase, ProgressStats
 from src.enhanced_progress_bar import EnhancedProgressWidget
 
@@ -56,6 +57,7 @@ class DownloadTab:
         self.summary_labels = {}
         self.status_message_var = tk.StringVar(value="Ready")
         self.memory_message_var = tk.StringVar(value="Memory: --")
+        self.download_mode_var = tk.StringVar(value="Current version only")
 
         self.download_tab_frame.grid_columnconfigure(0, weight=1)
         self.download_tab_frame.grid_columnconfigure(1, weight=1)
@@ -146,6 +148,29 @@ class DownloadTab:
             width=90
         )
         self.browse_path_button.grid(row=0, column=1)
+
+        # Download scope controls
+        scope_frame = ctk.CTkFrame(self.input_frame, fg_color="transparent")
+        scope_frame.grid(row=3, column=0, columnspan=3, padx=10, pady=(2, 10), sticky="ew")
+        scope_frame.grid_columnconfigure(1, weight=1)
+
+        self.download_scope_label = ctk.CTkLabel(scope_frame, text="Download scope:")
+        self.download_scope_label.grid(row=0, column=0, padx=(0, 6), sticky="w")
+
+        self.download_scope_menu = ctk.CTkOptionMenu(
+            scope_frame,
+            variable=self.download_mode_var,
+            values=["Current version only", "All versions"]
+        )
+        self.download_scope_menu.grid(row=0, column=1, sticky="w")
+
+        self.download_scope_hint = ctk.CTkLabel(
+            scope_frame,
+            text="Choose whether to download only the version referenced by each URL or every available version.",
+            font=ctk.CTkFont(size=10),
+            text_color="gray"
+        )
+        self.download_scope_hint.grid(row=1, column=0, columnspan=2, pady=(4, 0), sticky="w")
 
         # Load environment defaults
         from dotenv import load_dotenv
@@ -370,98 +395,172 @@ class DownloadTab:
     def _add_urls_to_queue(self, url_input_content, api_key, download_path):
         """Add URLs to the download queue."""
         try:
-            # Parse URLs using utility function
             urls = parse_urls_from_text(url_input_content)
             if not urls:
                 self.log_message("No URLs provided. Exiting.")
                 messagebox.showinfo("Download Info", "No URLs provided.")
-                # Re-enable download button immediately if no URLs
                 self.parent_app.after(0, lambda: self.download_button.configure(state="normal", text="Start Download"))
                 self.update_status_message("No URLs detected.")
                 return
 
-            valid_count = 0
-            failed_count = 0
-            
-            # Add each URL as a task to the queue
-            for url in urls:
-                # Validate URL format using utility function
-                if not validate_civitai_url(url):
-                    self.log_message(f"Skipping invalid URL: {url}")
-                    # Pre-register task to avoid race with queue processor
-                    task_id = f"task_{hash(url)}_{self.parent_app.queue_row_counter}"
-                    if task_id not in self.parent_app.download_tasks:
-                        # Minimal placeholder; UI will enrich this entry on main thread
-                        self.parent_app.download_tasks[task_id] = {
-                            'url': url,
-                            'stop_event': threading.Event(),
-                            'pause_event': threading.Event(),
-                            'frame': None,
-                            'progress_bar': None,
-                            'enhanced_progress': None,
-                            'tracker': None,
-                            'status_label': None,
-                            'cancel_button': None,
-                            'pause_button': None,
-                            'resume_button': None,
-                            'status_state': 'queued',
-                        }
-                    # Add GUI element for the invalid task with a failed status
-                    self.parent_app.after(0, self._add_download_task_ui, task_id, url)
-                    # Attempt to set status once UI is ready; guard missing label
-                    def _mark_invalid(tid=task_id):
-                        try:
-                            if tid in self.parent_app.download_tasks and self.parent_app.download_tasks[tid].get('status_label'):
-                                self.parent_app.download_tasks[tid]['status_label'].configure(text="Status: Failed - Invalid URL format", text_color="red")
-                        except Exception:
-                            pass
-                    self.parent_app.after(50, _mark_invalid)
-                    if hasattr(self.parent_app, '_set_task_state'):
-                        self.parent_app._set_task_state(task_id, 'failed')
-                    failed_count += 1
-                    continue
-                # Create a unique ID for each download task
-                task_id = f"task_{hash(url)}_{self.parent_app.queue_row_counter}"
-                # Pre-register task to avoid race with queue processor thread
-                if task_id not in self.parent_app.download_tasks:
-                    self.parent_app.download_tasks[task_id] = {
-                        'url': url,
-                        'stop_event': threading.Event(),
-                        'pause_event': threading.Event(),
-                        'frame': None,
-                            'progress_bar': None,
-                            'enhanced_progress': None,
-                            'tracker': None,
-                            'status_label': None,
-                            'cancel_button': None,
-                            'pause_button': None,
-                            'resume_button': None,
-                            'status_state': 'queued',
-                        }
-                with self.parent_app._queue_lock:
-                    self.parent_app._download_queue_list.append({'task_id': task_id, 'url': url, 'api_key': api_key, 'download_path': download_path})
-                    self.parent_app._queue_condition.notify() # Signal that a new item has been added
-                if hasattr(self.parent_app, '_set_task_state'):
-                    self.parent_app._set_task_state(task_id, 'queued')
-                else:
-                    if task_id in self.parent_app.download_tasks:
-                        self.parent_app.download_tasks[task_id]['status_state'] = 'queued'
-                # Add GUI element for the new task
-                self.parent_app.after(0, self._add_download_task_ui, task_id, url)
-                valid_count += 1
+            download_all_versions = self.download_mode_var.get() == "All versions"
 
-            if valid_count:
-                plural = "s" if valid_count != 1 else ""
-                self.update_status_message(f"Queued {valid_count} download{plural}.")
-            elif failed_count:
-                self.update_status_message("All URLs were invalid.")
+            for url in urls:
+                if download_all_versions:
+                    handled = self._queue_all_versions_for_url(url, api_key, download_path)
+                    if handled:
+                        continue
+                    self.log_message(f"Falling back to referenced version for {url}.")
+                self._queue_single_url(url, api_key, download_path)
         except Exception as e:
             self.log_message(f"An unexpected error occurred while adding URLs to queue: {e}")
             messagebox.showerror("Unexpected Error", f"An unexpected error occurred while adding URLs to queue: {e}")
         finally:
-            # Re-enable the download button only after all URLs are added to the queue.
-            # Actual download processing happens in _process_download_queue.
             self.parent_app.after(0, lambda: self.download_button.configure(state="normal", text="Start Download"))
+
+    def _queue_single_url(self, url, api_key, download_path):
+        """Queue a single model version download."""
+        if not validate_civitai_url(url):
+            self.log_message(f"Skipping invalid URL: {url}")
+            display_label = f"Invalid URL: {url}"
+            task_id = self._enqueue_url_task(
+                url,
+                api_key,
+                download_path,
+                display_label=display_label,
+                enqueue=False,
+                initial_state='failed'
+            )
+            self.parent_app.after(50, lambda tid=task_id: self.parent_app._safe_update_status(
+                tid,
+                "Status: Failed - Invalid URL format",
+                "red"
+            ))
+            return
+
+        self._enqueue_url_task(url, api_key, download_path)
+
+    def _queue_all_versions_for_url(self, url, api_key, download_path):
+        """Expand a model URL into separate tasks for every available version."""
+        model_id = self._extract_model_id(url)
+        if not model_id:
+            version_info, error = get_model_info_from_url(url, api_key)
+            if error or not version_info:
+                self.log_message(f"Unable to resolve model ID for {url}: {error or 'unknown error'}")
+                self.update_status_message("Could not enumerate versions; using referenced version only.")
+                return False
+            model_id = str(
+                version_info.get('modelId')
+                or version_info.get('model', {}).get('id')
+                or ""
+            )
+            if not model_id:
+                self.log_message(f"Could not determine model ID from metadata for {url}.")
+                self.update_status_message("Could not enumerate versions; using referenced version only.")
+                return False
+
+        model_data, error = get_model_with_versions(model_id, api_key)
+        if error or not model_data:
+            self.log_message(f"Failed to retrieve model metadata for {model_id}: {error or 'unknown error'}")
+            self.update_status_message(f"Failed to enumerate versions for model {model_id}.")
+            return False
+
+        versions = model_data.get('modelVersions') or []
+        if not versions:
+            self.log_message(f"No versions available for model {model_id}.")
+            self.update_status_message(f"No additional versions found for model {model_id}.")
+            return False
+
+        base_name = model_data.get('name') or f"Model {model_id}"
+        queued = 0
+        seen_version_ids = set()
+
+        for version in versions:
+            version_id = version.get('id')
+            if not version_id:
+                continue
+            version_id = str(version_id)
+            if version_id in seen_version_ids:
+                continue
+            seen_version_ids.add(version_id)
+
+            version_url = self._build_version_url(url, model_id, version_id)
+            version_name = version.get('name', f'Version {version_id}')
+            display_label = f"{base_name} - {version_name}"
+
+            self._enqueue_url_task(
+                version_url,
+                api_key,
+                download_path,
+                display_label=display_label
+            )
+            queued += 1
+
+        if queued:
+            message = f"Queued {queued} versions for {base_name}."
+            self.log_message(message)
+            self.update_status_message(message)
+            return True
+
+        self.log_message(f"No versions queued for model {model_id}.")
+        return False
+
+    def _enqueue_url_task(self, url, api_key, download_path, display_label=None, enqueue=True, initial_state='queued'):
+        """Create or update a task entry and optionally enqueue it for processing."""
+        task_id = f"task_{uuid.uuid4().hex}"
+        existing = self.parent_app.download_tasks.get(task_id, {})
+
+        task_entry = {
+            'url': url,
+            'display_url': display_label or url,
+            'stop_event': existing.get('stop_event', threading.Event()),
+            'pause_event': existing.get('pause_event', threading.Event()),
+            'frame': existing.get('frame'),
+            'progress_bar': existing.get('progress_bar'),
+            'enhanced_progress': existing.get('enhanced_progress'),
+            'tracker': existing.get('tracker'),
+            'status_label': existing.get('status_label'),
+            'cancel_button': existing.get('cancel_button'),
+            'pause_button': existing.get('pause_button'),
+            'resume_button': existing.get('resume_button'),
+            'pause_resume_button': existing.get('pause_resume_button'),
+            'context_button': existing.get('context_button'),
+            'status_indicator': existing.get('status_indicator'),
+            'status_state': existing.get('status_state', 'queued'),
+        }
+        self.parent_app.download_tasks[task_id] = task_entry
+
+        if enqueue:
+            with self.parent_app._queue_lock:
+                self.parent_app._download_queue_list.append({
+                    'task_id': task_id,
+                    'url': url,
+                    'api_key': api_key,
+                    'download_path': download_path
+                })
+                self.parent_app._queue_condition.notify()
+
+        if hasattr(self.parent_app, '_set_task_state'):
+            self.parent_app._set_task_state(task_id, initial_state)
+        else:
+            self.parent_app.download_tasks[task_id]['status_state'] = initial_state
+
+        self.parent_app.after(0, self._add_download_task_ui, task_id, url)
+        return task_id
+
+    def _extract_model_id(self, url):
+        """Extract the model ID from a Civitai URL."""
+        match = re.search(r'/models/(\\d+)', url)
+        return match.group(1) if match else None
+
+    def _build_version_url(self, original_url, model_id, version_id):
+        """Build a URL that points explicitly to a model version."""
+        parsed = urllib.parse.urlparse(original_url)
+        if parsed.scheme and parsed.netloc:
+            base = f"{parsed.scheme}://{parsed.netloc}"
+        else:
+            base = "https://civitai.com"
+        return f"{base}/models/{model_id}?modelVersionId={version_id}"
 
     def _add_download_task_ui(self, task_id, url):
         """Add a download task to the UI with enhanced card-based layout."""
@@ -505,7 +604,8 @@ class DownloadTab:
         status_indicator.grid_propagate(False)
         
         # URL display with better formatting
-        url_display = (url[:60] + '...') if len(url) > 63 else url
+        display_text = existing.get('display_url', existing.get('url', url))
+        url_display = (display_text[:60] + '...') if len(display_text) > 63 else display_text
         task_label = ctk.CTkLabel(
             header_frame,
             text=url_display,
@@ -538,7 +638,6 @@ class DownloadTab:
         tracker.set_phase(ProgressPhase.INITIALIZING)
         # Store references to update later. If a placeholder already exists (pre-registered
         # in _add_urls_to_queue), update it instead of overwriting to avoid races.
-        existing = self.parent_app.download_tasks.get(task_id, {})
         # Actions section at bottom of card
         actions_frame = ctk.CTkFrame(task_frame, fg_color="transparent")
         actions_frame.grid(row=2, column=0, columnspan=3, sticky="ew", padx=12, pady=(0, 12))
@@ -603,6 +702,7 @@ class DownloadTab:
             'enhanced_progress': enhanced_progress,
             'tracker': tracker,
             'status_label': status_label,
+            'display_url': display_text,
             'url': existing.get('url', url), # Preserve original URL if set
             'stop_event': existing.get('stop_event', threading.Event()), # Per-task stop event
             'pause_event': existing.get('pause_event', threading.Event()), # Per-task pause event
@@ -709,3 +809,4 @@ def create_download_tab(parent_app, download_tab_frame):
         DownloadTab: Initialized download tab component
     """
     return DownloadTab(parent_app, download_tab_frame)
+

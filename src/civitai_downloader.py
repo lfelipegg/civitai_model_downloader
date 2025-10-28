@@ -211,6 +211,34 @@ def get_hash_from_model_id(model_id, target_version_id, api_key):
 
 
 
+def get_model_with_versions(model_id, api_key=None):
+    """
+    Fetch complete model metadata including available versions.
+    """
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    endpoint = f"{CIVITAI_BASE_URL}/models/{model_id}"
+
+    @retry(exceptions=(requests.exceptions.HTTPError, requests.exceptions.RequestException), tries=3, delay=2, backoff=2)
+    def _get_model_response_with_retry(url, headers):
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response
+
+    try:
+        response = _get_model_response_with_retry(endpoint, headers)
+        return response.json(), None
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 401:
+            return None, "Unauthorized: Invalid API Key or missing authentication."
+        elif e.response.status_code == 404:
+            return None, f"Not Found: Model with ID {model_id} not found."
+        elif e.response.status_code == 429:
+            return None, "Too Many Requests: Rate limit exceeded. Please wait and try again."
+        return None, f"HTTP Error: {e.response.status_code} - {e.response.reason}"
+    except requests.exceptions.RequestException as e:
+        return None, f"Network Error: Could not connect to Civitai API. {e}"
+
+
 def get_model_info_from_url(url, api_key):
     """
     Extracts model information from a Civitai URL.
@@ -218,8 +246,6 @@ def get_model_info_from_url(url, api_key):
     model_id_match = re.search(r'models/(\d+)', url)
     model_version_id_path_match = re.search(r'model-versions/(\d+)', url)
     model_version_id_query_match = re.search(r'modelVersionId=(\d+)', url)
-
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     model_version_id = None
     model_id = None
@@ -241,39 +267,16 @@ def get_model_info_from_url(url, api_key):
             return get_model_version_data_with_fallback(model_version_id, api_key=api_key)
     elif model_id_match:
         model_id = model_id_match.group(1)
-        try:
-            endpoint = f"{CIVITAI_BASE_URL}/models/{model_id}"
-            print(f"Fetching model info from: {endpoint}")
-            
-            @retry(exceptions=(requests.exceptions.HTTPError, requests.exceptions.RequestException), tries=3, delay=2, backoff=2)
-            def _get_model_response_with_retry(url, headers):
-                response = requests.get(url, headers=headers)
-                response.raise_for_status()
-                return response
+        model_data, error = get_model_with_versions(model_id, api_key)
+        if error:
+            return None, error
 
-            response = _get_model_response_with_retry(endpoint, headers)
-            model_info = response.json()
-            if model_info and model_info.get('modelVersions'):
-                # Find the latest version by checking the 'createdAt' or 'updatedAt' field,
-                # or assume the first one is the latest if no specific ordering is guaranteed by the API
-                # For now, keeping the existing logic of assuming the first is latest, as per original code.
-                latest_version = model_info['modelVersions'][0]
-                endpoint = f"{CIVITAI_BASE_URL}/model-versions/{latest_version['id']}"
-                print(f"Fetching latest model version info from: {endpoint}")
-                response = _get_model_response_with_retry(endpoint, headers) # Use retry for this call too
-                return response.json(), None
-            return None, f"No model versions found for model ID: {model_id}"
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 401:
-                return None, "Unauthorized: Invalid API Key or missing authentication."
-            elif e.response.status_code == 404:
-                return None, f"Not Found: Model with ID {model_id} not found."
-            elif e.response.status_code == 429:
-                return None, "Too Many Requests: Rate limit exceeded. Please wait and try again."
-            else:
-                return None, f"HTTP Error: {e.response.status_code} - {e.response.reason}"
-        except requests.exceptions.RequestException as e:
-            return None, f"Network Error: Could not connect to Civitai API. {e}"
+        versions = model_data.get('modelVersions') or []
+        if versions:
+            latest_version_id = versions[0].get('id')
+            if latest_version_id:
+                return get_model_version_data(latest_version_id, api_key=api_key)
+        return None, f"No model versions found for model ID: {model_id}"
     return None, "Invalid Civitai URL provided."
 
 def download_file(url, path, api_key=None, progress_callback=None, expected_sha256=None, stop_event=None, pause_event=None):
