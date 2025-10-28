@@ -53,74 +53,219 @@ class DownloadTab:
     
     def setup_download_tab(self):
         """Setup the download tab UI components."""
-        # Configure grid layout for download tab
-        self.download_tab_frame.grid_columnconfigure(1, weight=1)
-        self.download_tab_frame.grid_rowconfigure(4, weight=1)
+        self.summary_labels = {}
+        self.status_message_var = tk.StringVar(value="Ready")
+        self.memory_message_var = tk.StringVar(value="Memory: --")
 
-        # Input Frame
+        self.download_tab_frame.grid_columnconfigure(0, weight=1)
+        self.download_tab_frame.grid_columnconfigure(1, weight=1)
+
+        # Input section
         self.input_frame = ctk.CTkFrame(self.download_tab_frame)
-        self.input_frame.grid(row=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        self.input_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
         self.input_frame.grid_columnconfigure(1, weight=1)
 
-        # URL Input
-        self.url_label = ctk.CTkLabel(self.input_frame, text="Civitai URL:")
-        self.url_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
-        self.url_entry = ctk.CTkTextbox(self.input_frame, height=100, width=400) # Increased height for multiple URLs
-        self.url_entry.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
-        self.browse_button = ctk.CTkButton(self.input_frame, text="Browse .txt", command=self.browse_txt_file)
-        self.browse_button.grid(row=0, column=2, padx=10, pady=10, sticky="e")
+        self.url_label = ctk.CTkLabel(
+            self.input_frame,
+            text="Download URLs:",
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.url_label.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
 
-        # API Key Input
-        # Move API key and download path labels down due to increased URL entry height
-        self.api_key_label = ctk.CTkLabel(self.input_frame, text="Civitai API Key:")
-        self.api_key_label.grid(row=1, column=0, padx=10, pady=(10, 5), sticky="w")
-        self.api_key_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Enter your Civitai API Key (optional)", show="*")
-        self.api_key_entry.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
+        self.url_entry = ctk.CTkTextbox(self.input_frame, height=90)
+        self.url_entry.grid(row=0, column=1, padx=10, pady=(10, 5), sticky="nsew")
 
-        # Download Path Input
-        self.download_path_label = ctk.CTkLabel(self.input_frame, text="Download Path:")
-        self.download_path_label.grid(row=2, column=0, padx=10, pady=(5, 10), sticky="w")
-        self.download_path_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Select download directory")
-        self.download_path_entry.grid(row=2, column=1, padx=10, pady=10, sticky="ew")
-        self.browse_path_button = ctk.CTkButton(self.input_frame, text="Browse Dir", command=self.browse_download_path)
-        self.browse_path_button.grid(row=2, column=2, padx=10, pady=10, sticky="e")
+        quick_actions_frame = ctk.CTkFrame(self.input_frame, fg_color="transparent")
+        quick_actions_frame.grid(row=0, column=2, padx=10, pady=(10, 5), sticky="ne")
+        quick_actions_frame.grid_columnconfigure(0, weight=1)
 
-        # Load environment variables
+        self.paste_button = ctk.CTkButton(
+            quick_actions_frame,
+            text="Paste",
+            command=self.paste_from_clipboard,
+            width=120
+        )
+        self.paste_button.grid(row=0, column=0, pady=(0, 4), sticky="ew")
+
+        self.browse_button = ctk.CTkButton(
+            quick_actions_frame,
+            text="Load From File",
+            command=self.browse_txt_file,
+            width=120
+        )
+        self.browse_button.grid(row=1, column=0, pady=(0, 4), sticky="ew")
+
+        self.clear_urls_button = ctk.CTkButton(
+            quick_actions_frame,
+            text="Clear Input",
+            command=self.clear_urls,
+            width=120,
+            fg_color="transparent",
+            text_color=("gray40", "gray60"),
+            hover_color=("gray90", "gray20")
+        )
+        self.clear_urls_button.grid(row=2, column=0, sticky="ew")
+
+        # API key controls
+        self.api_key_label = ctk.CTkLabel(self.input_frame, text="API Key:")
+        self.api_key_label.grid(row=1, column=0, padx=10, pady=(5, 2), sticky="w")
+
+        self.api_key_entry = ctk.CTkEntry(
+            self.input_frame,
+            placeholder_text="Optional: required for private models",
+            show="*"
+        )
+        self.api_key_entry.grid(row=1, column=1, padx=10, pady=(5, 2), sticky="ew")
+
+        self.api_hint_label = ctk.CTkLabel(
+            self.input_frame,
+            text="Tip: adding an API key enables private downloads and higher rate limits.",
+            font=ctk.CTkFont(size=10),
+            text_color="gray"
+        )
+        self.api_hint_label.grid(row=1, column=2, padx=10, pady=(5, 2), sticky="w")
+
+        # Download path controls
+        self.download_path_label = ctk.CTkLabel(self.input_frame, text="Download Folder:")
+        self.download_path_label.grid(row=2, column=0, padx=10, pady=(2, 10), sticky="w")
+
+        download_path_frame = ctk.CTkFrame(self.input_frame, fg_color="transparent")
+        download_path_frame.grid(row=2, column=1, columnspan=2, padx=10, pady=(2, 10), sticky="ew")
+        download_path_frame.grid_columnconfigure(0, weight=1)
+
+        self.download_path_entry = ctk.CTkEntry(
+            download_path_frame,
+            placeholder_text="Select download directory"
+        )
+        self.download_path_entry.grid(row=0, column=0, padx=(0, 6), sticky="ew")
+
+        self.browse_path_button = ctk.CTkButton(
+            download_path_frame,
+            text="Browse",
+            command=self.browse_download_path,
+            width=90
+        )
+        self.browse_path_button.grid(row=0, column=1)
+
+        # Load environment defaults
         from dotenv import load_dotenv
         load_dotenv()
         self.api_key_entry.insert(0, os.getenv("CIVITAI_API_KEY", ""))
         self.download_path_entry.insert(0, os.getenv("DOWNLOAD_PATH", os.getcwd()))
 
-        # Download Button
-        self.download_button = ctk.CTkButton(self.download_tab_frame, text="Start Download", command=self.start_download_thread)
+        # Primary actions
+        self.download_button = ctk.CTkButton(
+            self.download_tab_frame,
+            text="Start Download",
+            command=self.start_download_thread
+        )
         self.download_button.grid(row=1, column=0, padx=(10, 5), pady=10, sticky="ew")
 
-        # Open Download Folder Button
-        self.open_folder_button = ctk.CTkButton(self.download_tab_frame, text="Open Downloads Folder", command=self.open_download_folder)
+        self.open_folder_button = ctk.CTkButton(
+            self.download_tab_frame,
+            text="Open Downloads Folder",
+            command=self.open_download_folder
+        )
         self.open_folder_button.grid(row=1, column=1, padx=(5, 10), pady=10, sticky="ew")
 
-        # Clear/Reset Button
-        self.clear_button = ctk.CTkButton(self.download_tab_frame, text="Clear/Reset GUI", command=self.clear_gui)
-        self.clear_button.grid(row=8, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
+        # Summary cards
+        summary_frame = ctk.CTkFrame(self.download_tab_frame)
+        summary_frame.grid(row=2, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="ew")
+        summary_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
-        # Global progress labels removed - individual task progress is shown in enhanced progress widgets
+        for column, (key, label_text) in enumerate((
+            ("queued", "Queued"),
+            ("active", "Active"),
+            ("completed", "Completed"),
+            ("failed", "Failed"),
+        )):
+            card = ctk.CTkFrame(summary_frame, corner_radius=10, fg_color=("gray94", "gray12"))
+            card.grid(row=0, column=column, padx=6, pady=6, sticky="ew")
+            title_label = ctk.CTkLabel(card, text=label_text, font=ctk.CTkFont(size=11))
+            title_label.grid(row=0, column=0, padx=10, pady=(8, 0), sticky="w")
+            value_label = ctk.CTkLabel(card, text="0", font=ctk.CTkFont(size=24, weight="bold"))
+            value_label.grid(row=1, column=0, padx=10, pady=(0, 8), sticky="w")
+            self.summary_labels[key] = value_label
 
-
-        # Download Queue Display
+        # Download queue display
         self.queue_frame = ctk.CTkScrollableFrame(self.download_tab_frame, label_text="Download Queue")
-        self.queue_frame.grid(row=5, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+        self.queue_frame.grid(row=4, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
         self.queue_frame.grid_columnconfigure(0, weight=1)
 
-        # Log Area
-        self.log_label = ctk.CTkLabel(self.download_tab_frame, text="Logs:")
-        self.log_label.grid(row=6, column=0, padx=10, pady=(10, 0), sticky="w")
+        # Log area
+        self.log_label = ctk.CTkLabel(self.download_tab_frame, text="Activity Log:")
+        self.log_label.grid(row=5, column=0, padx=10, pady=(10, 0), sticky="w")
         self.log_text = ctk.CTkTextbox(self.download_tab_frame, width=600, height=200)
-        self.log_text.grid(row=7, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
-        self.log_text.configure(state="disabled") # Make it read-only
+        self.log_text.grid(row=6, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
+        self.log_text.configure(state="disabled")
 
-        # Configure grid layout to expand queue and log area
-        self.download_tab_frame.grid_rowconfigure(5, weight=2) # Queue frame
-        self.download_tab_frame.grid_rowconfigure(7, weight=1) # Log area
+        # Status bar
+        status_bar = ctk.CTkFrame(self.download_tab_frame, fg_color=("gray95", "gray10"))
+        status_bar.grid(row=7, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="ew")
+        status_bar.grid_columnconfigure(0, weight=1)
+        status_bar.grid_columnconfigure(1, weight=0)
+        status_bar.grid_columnconfigure(2, weight=0)
+
+        self.status_label = ctk.CTkLabel(status_bar, textvariable=self.status_message_var, anchor="w")
+        self.status_label.grid(row=0, column=0, padx=10, pady=6, sticky="w")
+
+        self.memory_label = ctk.CTkLabel(status_bar, textvariable=self.memory_message_var, anchor="e")
+        self.memory_label.grid(row=0, column=1, padx=10, pady=6, sticky="e")
+
+        self.clear_button = ctk.CTkButton(status_bar, text="Clear GUI", command=self.clear_gui, width=110)
+        self.clear_button.grid(row=0, column=2, padx=(5, 10), pady=6, sticky="e")
+
+        # Growth behaviour
+        self.download_tab_frame.grid_rowconfigure(4, weight=2)
+        self.download_tab_frame.grid_rowconfigure(6, weight=1)
+
+        # Initialise indicators
+        self.update_summary(0, 0, 0, 0)
+        self.update_status_message("Ready")
+
+    def clear_urls(self):
+        """Clear only the URL input box."""
+        self.url_entry.delete("1.0", ctk.END)
+        self.update_status_message("URL input cleared.")
+
+    def paste_from_clipboard(self):
+        """Paste URLs from the system clipboard into the input box."""
+        try:
+            clipboard_text = self.download_tab_frame.clipboard_get()
+        except tk.TclError:
+            messagebox.showwarning("Clipboard", "No text available on the clipboard.")
+            return
+
+        if clipboard_text:
+            self.url_entry.delete("1.0", ctk.END)
+            self.url_entry.insert("1.0", clipboard_text.strip())
+            self.update_status_message("URLs pasted from clipboard.")
+
+    def update_summary(self, queued: int, active: int, completed: int, failed: int):
+        """Update the queue summary cards."""
+        if not self.summary_labels:
+            return
+
+        self.summary_labels["queued"].configure(text=str(max(queued, 0)))
+        self.summary_labels["active"].configure(text=str(max(active, 0)))
+        self.summary_labels["completed"].configure(text=str(max(completed, 0)))
+        self.summary_labels["failed"].configure(text=str(max(failed, 0)))
+
+    def update_memory(self, message: str, warning_level: str = "low"):
+        """Update the memory indicator in the status bar."""
+        level = (warning_level or "low").lower()
+        color_map = {
+            "critical": "#f44336",
+            "high": "#fb8c00",
+            "medium": "#fbc02d",
+            "low": "gray60",
+        }
+        self.memory_message_var.set(message)
+        self.memory_label.configure(text_color=color_map.get(level, "gray60"))
+
+    def update_status_message(self, message: str):
+        """Update the status bar message."""
+        self.status_message_var.set(message or "")
 
     def browse_txt_file(self):
         """Browse for a text file containing URLs."""
@@ -130,6 +275,7 @@ class DownloadTab:
                 content = f.read()
             self.url_entry.delete("1.0", ctk.END) # Clear existing content
             self.url_entry.insert("1.0", content) # Insert new content
+            self.update_status_message(f"Loaded URLs from {os.path.basename(file_path)}.")
 
     def browse_download_path(self):
         """Browse for download directory."""
@@ -137,6 +283,7 @@ class DownloadTab:
         if dir_path:
             self.download_path_entry.delete(0, ctk.END)
             self.download_path_entry.insert(0, dir_path)
+            self.update_status_message(f"Download folder set to {dir_path}.")
 
     def log_message(self, message):
         """Log a message to the GUI log area."""
@@ -144,6 +291,7 @@ class DownloadTab:
         if not hasattr(self, 'logger'):
             self.logger = ThreadSafeLogger(self.log_text)
         self.logger.log_message(message)
+        self.update_status_message(message)
 
     def start_download_thread(self):
         """Start the download process in a separate thread."""
@@ -164,6 +312,7 @@ class DownloadTab:
         self.log_text.configure(state="disabled")
 
         self.log_message("Starting download process...")
+        self.update_status_message("Preparing downloads...")
         self.download_button.configure(state="disabled", text="Downloading...")
 
         # Start download in a separate thread to keep GUI responsive
@@ -228,7 +377,11 @@ class DownloadTab:
                 messagebox.showinfo("Download Info", "No URLs provided.")
                 # Re-enable download button immediately if no URLs
                 self.parent_app.after(0, lambda: self.download_button.configure(state="normal", text="Start Download"))
+                self.update_status_message("No URLs detected.")
                 return
+
+            valid_count = 0
+            failed_count = 0
             
             # Add each URL as a task to the queue
             for url in urls:
@@ -251,6 +404,7 @@ class DownloadTab:
                             'cancel_button': None,
                             'pause_button': None,
                             'resume_button': None,
+                            'status_state': 'queued',
                         }
                     # Add GUI element for the invalid task with a failed status
                     self.parent_app.after(0, self._add_download_task_ui, task_id, url)
@@ -258,10 +412,13 @@ class DownloadTab:
                     def _mark_invalid(tid=task_id):
                         try:
                             if tid in self.parent_app.download_tasks and self.parent_app.download_tasks[tid].get('status_label'):
-                                self.parent_app.download_tasks[tid]['status_label'].configure(text=f"Status: Failed - Invalid URL format", text_color="red")
+                                self.parent_app.download_tasks[tid]['status_label'].configure(text="Status: Failed - Invalid URL format", text_color="red")
                         except Exception:
                             pass
                     self.parent_app.after(50, _mark_invalid)
+                    if hasattr(self.parent_app, '_set_task_state'):
+                        self.parent_app._set_task_state(task_id, 'failed')
+                    failed_count += 1
                     continue
                 # Create a unique ID for each download task
                 task_id = f"task_{hash(url)}_{self.parent_app.queue_row_counter}"
@@ -272,19 +429,32 @@ class DownloadTab:
                         'stop_event': threading.Event(),
                         'pause_event': threading.Event(),
                         'frame': None,
-                        'progress_bar': None,
-                        'enhanced_progress': None,
-                        'tracker': None,
-                        'status_label': None,
-                        'cancel_button': None,
-                        'pause_button': None,
-                        'resume_button': None,
-                    }
+                            'progress_bar': None,
+                            'enhanced_progress': None,
+                            'tracker': None,
+                            'status_label': None,
+                            'cancel_button': None,
+                            'pause_button': None,
+                            'resume_button': None,
+                            'status_state': 'queued',
+                        }
                 with self.parent_app._queue_lock:
                     self.parent_app._download_queue_list.append({'task_id': task_id, 'url': url, 'api_key': api_key, 'download_path': download_path})
                     self.parent_app._queue_condition.notify() # Signal that a new item has been added
+                if hasattr(self.parent_app, '_set_task_state'):
+                    self.parent_app._set_task_state(task_id, 'queued')
+                else:
+                    if task_id in self.parent_app.download_tasks:
+                        self.parent_app.download_tasks[task_id]['status_state'] = 'queued'
                 # Add GUI element for the new task
                 self.parent_app.after(0, self._add_download_task_ui, task_id, url)
+                valid_count += 1
+
+            if valid_count:
+                plural = "s" if valid_count != 1 else ""
+                self.update_status_message(f"Queued {valid_count} download{plural}.")
+            elif failed_count:
+                self.update_status_message("All URLs were invalid.")
         except Exception as e:
             self.log_message(f"An unexpected error occurred while adding URLs to queue: {e}")
             messagebox.showerror("Unexpected Error", f"An unexpected error occurred while adding URLs to queue: {e}")
@@ -324,14 +494,15 @@ class DownloadTab:
         header_frame.grid_columnconfigure(1, weight=1)
         
         # Task status indicator (colored dot)
-        status_indicator = ctk.CTkLabel(
+        status_indicator = ctk.CTkFrame(
             header_frame,
-            text="●",
-            font=ctk.CTkFont(size=16),
-            text_color="#ffa500",  # Orange for initializing
-            width=20
+            width=12,
+            height=12,
+            fg_color="#ffa500",
+            corner_radius=6
         )
         status_indicator.grid(row=0, column=0, padx=(0, 8), sticky="w")
+        status_indicator.grid_propagate(False)
         
         # URL display with better formatting
         url_display = (url[:60] + '...') if len(url) > 63 else url
@@ -380,7 +551,7 @@ class DownloadTab:
         # Primary action button (Pause/Resume toggle) - larger and more prominent
         pause_resume_button = ctk.CTkButton(
             button_container,
-            text="⏸ Pause",
+            text="Pause",
             command=lambda tid=task_id: self.parent_app.toggle_pause_resume(tid),
             width=90,
             height=32,
@@ -392,7 +563,7 @@ class DownloadTab:
         # Secondary action button (Cancel) - distinctive styling
         cancel_button = ctk.CTkButton(
             button_container,
-            text="✕",
+            text="Cancel",
             command=lambda tid=task_id: self.parent_app.cancel_download(tid),
             width=32,
             height=32,
@@ -406,7 +577,7 @@ class DownloadTab:
         # Context menu button for advanced actions - subtle styling
         context_button = ctk.CTkButton(
             button_container,
-            text="⋯",
+            text="...",
             command=lambda tid=task_id: self.parent_app.show_task_context_menu(tid, button_container),
             width=32,
             height=32,
@@ -438,6 +609,7 @@ class DownloadTab:
             'pause_resume_button': pause_resume_button,
             'cancel_button': cancel_button,
             'context_button': context_button,
+            'status_state': existing.get('status_state', 'queued'),
             # Legacy references for compatibility
             'pause_button': pause_resume_button,
             'resume_button': pause_resume_button
@@ -445,9 +617,7 @@ class DownloadTab:
 
     def clear_gui(self):
         """Clear the GUI input fields."""
-        self.url_entry.delete("1.0", ctk.END)
-        # Only clear the URL entry as requested
-
+        self.clear_urls()
         # Clear background threads tracking
         self.parent_app.background_threads.clear()
 

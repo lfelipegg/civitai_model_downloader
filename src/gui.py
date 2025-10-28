@@ -52,6 +52,7 @@ class App(ctk.CTk):
         self.background_threads = {} # To track background threads for completion detection
         self.queue_row_counter = 0 # To manage grid placement in the queue_frame
         self.stop_event = threading.Event() # Event to signal threads to stop
+        self.queue_session_totals = {'completed': 0, 'failed': 0}
         
         # Progress update queue for thread-safe UI updates
         self.progress_queue = queue.Queue()
@@ -78,17 +79,33 @@ class App(ctk.CTk):
         
         # Setup download tab using component
         self.download_tab_component = create_download_tab(self, self.download_tab)
+        # Expose key widgets from the component for legacy methods
+        self.url_entry = self.download_tab_component.url_entry
+        self.download_path_entry = self.download_tab_component.download_path_entry
+        self.api_key_entry = self.download_tab_component.api_key_entry
+        self.download_button = self.download_tab_component.download_button
+        self.open_folder_button = self.download_tab_component.open_folder_button
+        self.clear_button = self.download_tab_component.clear_button
+        self.queue_frame = self.download_tab_component.queue_frame
+        self.log_text = self.download_tab_component.log_text
+        self._refresh_queue_summary()
         
         # History tab removed
         
         # Start memory monitoring
         memory_monitor.start_monitoring()
+        try:
+            initial_stats = memory_monitor.get_current_stats()
+        except Exception:
+            initial_stats = None
+        self._update_memory_indicator(initial_stats)
     
     def _setup_memory_monitoring(self):
         """Setup memory monitoring with warning callbacks"""
         def memory_warning_callback(stats):
             """Handle memory warnings"""
             try:
+                self.after(0, lambda s=stats: self._update_memory_indicator(s))
                 warning_message = (
                     f"Memory Warning ({stats.warning_level.value.title()}):\n"
                     f"Process: {stats.process_memory_mb:.1f} MB\n"
@@ -136,7 +153,13 @@ class App(ctk.CTk):
                 self.log_message("Memory cleanup completed successfully.")
             else:
                 self.log_message("Memory cleanup encountered some issues.")
-                
+
+            try:
+                stats = memory_monitor.get_current_stats()
+            except Exception:
+                stats = None
+            self.after(0, lambda s=stats: self._update_memory_indicator(s))
+            
         except Exception as e:
             print(f"Error during memory cleanup: {e}")
             self.log_message(f"Error during memory cleanup: {e}")
@@ -202,6 +225,53 @@ class App(ctk.CTk):
         except Exception as e:
             print(f"Error applying progress update: {e}")
 
+    def _refresh_queue_summary(self):
+        """Update the summary cards in the download tab."""
+        if not hasattr(self, 'download_tab_component') or not self.download_tab_component:
+            return
+
+        queued = len(self._download_queue_list)
+        active = sum(
+            1 for task in self.download_tasks.values()
+            if task.get('status_state') in ('active', 'downloading')
+        )
+        completed = self.queue_session_totals.get('completed', 0)
+        failed = self.queue_session_totals.get('failed', 0)
+
+        def apply_summary():
+            try:
+                self.download_tab_component.update_summary(queued, active, completed, failed)
+            except Exception as exc:
+                print(f"Warning: failed to update summary: {exc}")
+
+        self.after(0, apply_summary)
+
+    def _set_task_state(self, task_id, new_state):
+        """Track task state transitions for summary updates."""
+        task = self.download_tasks.get(task_id)
+        previous = None
+        if task is not None:
+            previous = task.get('status_state')
+            task['status_state'] = new_state
+
+        if new_state == 'completed' and previous != 'completed':
+            self.queue_session_totals['completed'] += 1
+        elif new_state in ('failed', 'cancelled') and previous not in ('failed', 'cancelled'):
+            self.queue_session_totals['failed'] += 1
+
+        self._refresh_queue_summary()
+
+    def _update_memory_indicator(self, stats):
+        """Push memory statistics into the status bar."""
+        if not stats or not hasattr(self, 'download_tab_component') or not self.download_tab_component:
+            return
+
+        summary = f"Memory: {stats.process_memory_mb:.0f} MB | System {stats.system_memory_percent:.0f}% used"
+        try:
+            self.download_tab_component.update_memory(summary, stats.warning_level.value)
+        except Exception as exc:
+            print(f"Warning: failed to update memory indicator: {exc}")
+
     def _setup_download_tab(self):
         # Configure grid layout for download tab
         self.download_tab.grid_columnconfigure(1, weight=1)
@@ -231,7 +301,7 @@ class App(ctk.CTk):
         
         self.browse_button = ctk.CTkButton(
             quick_actions_frame,
-            text="📁 Load File",
+            text="ðŸ“ Load File",
             command=self.browse_txt_file,
             width=100,
             height=28
@@ -240,7 +310,7 @@ class App(ctk.CTk):
         
         self.clear_urls_button = ctk.CTkButton(
             quick_actions_frame,
-            text="🗑 Clear",
+            text="ðŸ—‘ Clear",
             command=self.clear_urls,
             width=100,
             height=28,
@@ -276,7 +346,7 @@ class App(ctk.CTk):
         self.advanced_expanded = False
         self.advanced_toggle_button = ctk.CTkButton(
             self.input_frame,
-            text="▼ Advanced Settings",
+            text="â–¼ Advanced Settings",
             command=self.toggle_advanced_settings,
             width=150,
             height=24,
@@ -310,7 +380,7 @@ class App(ctk.CTk):
         # Help text for API key
         self.api_help_label = ctk.CTkLabel(
             self.advanced_frame,
-            text="💡 API key enables downloading private models and increases rate limits",
+            text="ðŸ’¡ API key enables downloading private models and increases rate limits",
             font=ctk.CTkFont(size=10),
             text_color="gray"
         )
@@ -375,6 +445,11 @@ class App(ctk.CTk):
         if not hasattr(self, 'logger'):
             self.logger = ThreadSafeLogger(self.log_text)
         self.logger.log_message(message)
+        try:
+            if hasattr(self, 'download_tab_component') and self.download_tab_component:
+                self.download_tab_component.update_status_message(message)
+        except Exception:
+            pass
 
     def start_download_thread(self):
         # Get content from CTkTextbox
@@ -550,7 +625,7 @@ class App(ctk.CTk):
         # Task status indicator (colored dot)
         status_indicator = ctk.CTkLabel(
             header_frame,
-            text="●",
+            text="â—",
             font=ctk.CTkFont(size=16),
             text_color="#ffa500",  # Orange for initializing
             width=20
@@ -619,7 +694,7 @@ class App(ctk.CTk):
         # Primary action button (Pause/Resume toggle) - larger and more prominent
         pause_resume_button = ctk.CTkButton(
             button_container,
-            text="⏸ Pause",
+            text="â¸ Pause",
             command=lambda tid=task_id: self.toggle_pause_resume(tid),
             width=90,
             height=32,
@@ -631,7 +706,7 @@ class App(ctk.CTk):
         # Secondary action button (Cancel) - distinctive styling
         cancel_button = ctk.CTkButton(
             button_container,
-            text="✕",
+            text="âœ•",
             command=lambda tid=task_id: self.cancel_download(tid),
             width=32,
             height=32,
@@ -645,7 +720,7 @@ class App(ctk.CTk):
         # Context menu button for advanced actions - subtle styling
         context_button = ctk.CTkButton(
             button_container,
-            text="⋯",
+            text="â‹¯",
             command=lambda tid=task_id: self.show_task_context_menu(tid, button_container),
             width=32,
             height=32,
@@ -695,6 +770,9 @@ class App(ctk.CTk):
                 task['pause_button'].configure(state="disabled")
             if task['resume_button']:
                 task['resume_button'].configure(state="disabled")
+            if task.get('pause_resume_button'):
+                task['pause_resume_button'].configure(state="disabled", text="Cancelled")
+            self._set_task_state(task_id, 'cancelled')
             self.log_message(f"Cancellation requested for task: {task['url']}")
     def pause_download(self, task_id):
         if task_id in self.download_tasks:
@@ -712,6 +790,9 @@ class App(ctk.CTk):
                 task['pause_button'].configure(state="disabled")
             if task['resume_button']:
                 task['resume_button'].configure(state="normal")
+            if task.get('pause_resume_button'):
+                task['pause_resume_button'].configure(text="Resume")
+            self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Paused", "gray"))
             self.log_message(f"Pause requested for task: {task['url']}")
             
     def resume_download(self, task_id):
@@ -730,6 +811,9 @@ class App(ctk.CTk):
                 task['pause_button'].configure(state="normal")
             if task['resume_button']:
                 task['resume_button'].configure(state="disabled")
+            if task.get('pause_resume_button'):
+                task['pause_resume_button'].configure(text="Pause")
+            self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Downloading...", "#2196F3"))
             self.log_message(f"Resume requested for task: {task['url']}")
     
     def toggle_pause_resume(self, task_id):
@@ -745,11 +829,9 @@ class App(ctk.CTk):
             if task['pause_event'].is_set():  # Currently paused
                 # Resume the task
                 self.resume_download(task_id)
-                button.configure(text="⏸ Pause")
             else:  # Currently running
                 # Pause the task
                 self.pause_download(task_id)
-                button.configure(text="▶ Resume")
     
     def show_task_context_menu(self, task_id, parent_widget):
         """Show context menu for advanced task actions"""
@@ -758,11 +840,11 @@ class App(ctk.CTk):
         # Create context menu
         context_menu = tk.Menu(self, tearoff=0)
         context_menu.add_command(
-            label="Move Up ▲",
+            label="Move Up",
             command=lambda: self.move_task_up(task_id)
         )
         context_menu.add_command(
-            label="Move Down ▼",
+            label="Move Down",
             command=lambda: self.move_task_down(task_id)
         )
         context_menu.add_separator()
@@ -799,6 +881,7 @@ class App(ctk.CTk):
                     del self.background_threads[task_id]
 
                 self._update_queue_ui_order()  # Re-grid remaining tasks
+                self._refresh_queue_summary()
                 print(f"Cleaned up task UI for: {task_id}")  # Debug logging
             except Exception as e:
                 print(f"Error during task cleanup for {task_id}: {e}")
@@ -957,13 +1040,16 @@ class App(ctk.CTk):
                         waited += 0.05
                 if task_id not in self.download_tasks:
                     self.log_message(f"Error: Task {task_id} not found in download_tasks dictionary. Skipping.")
+                    self._refresh_queue_summary()
                     continue
+                self._set_task_state(task_id, 'active')
                 task_stop_event = self.download_tasks[task_id]['stop_event']
                 
                 # Handle task cancelled before processing
                 if task_stop_event.is_set():
                     self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Cancelled", "red"))
                     self.log_message(f"Task {url} was cancelled before processing. Skipping.")
+                    self._set_task_state(task_id, 'cancelled')
                     self._cleanup_task_ui(task_id)
                     continue
                 try:
@@ -975,6 +1061,7 @@ class App(ctk.CTk):
                         self.after_idle(lambda id=task_id, msg=error_message: self._safe_update_status(id, f"Status: Failed - {msg}", "red"))
                         self.log_message(f"Error retrieving model info for {url}: {error_message}")
                         self.after_idle(lambda msg=error_message, u=url: messagebox.showerror("Download Error", f"Could not retrieve model information for URL: {u}\nError: {msg}"))
+                        self._set_task_state(task_id, 'failed')
                         self._cleanup_task_ui(task_id)
                         continue
                     
@@ -982,6 +1069,7 @@ class App(ctk.CTk):
                     if is_model_downloaded(model_info, download_path):
                         self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Already Downloaded"))
                         self.log_message(f"Model {model_info['model']['name']} v{model_info['name']} already downloaded. Skipping.")
+                        self._set_task_state(task_id, 'completed')
                         self._cleanup_task_ui(task_id)
                         continue
                     
@@ -1007,14 +1095,15 @@ class App(ctk.CTk):
                         self.after_idle(lambda id=task_id, err=download_error: self._safe_update_status(id, f"Status: Failed - {err}", "red"))
                         self.log_message(f"Download failed for {url}: {download_error}")
                         self.after_idle(lambda u=url, err=download_error: messagebox.showerror("Download Error", f"Download failed for {u}\nError: {err}"))
+                        self._set_task_state(task_id, 'failed')
                         self._cleanup_task_ui(task_id)
                     else:
                         # Store background thread for completion tracking
                         if bg_thread:
                             self.background_threads[task_id] = bg_thread
-
                         self.after_idle(lambda id=task_id: self._safe_update_status(id, "Status: Complete", "green"))
                         self.log_message(f"Download complete for {url}")
+                        self._set_task_state(task_id, 'completed')
                         self._cleanup_task_ui(task_id)
                     
                 except Exception as e:
@@ -1044,7 +1133,10 @@ class App(ctk.CTk):
                 # Update status indicator color based on status
                 if status_indicator is not None:
                     indicator_color = self._get_status_indicator_color(status_text)
-                    status_indicator.configure(text_color=indicator_color)
+                    try:
+                        status_indicator.configure(fg_color=indicator_color)
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"Error updating status for task {task_id}: {e}")
     
