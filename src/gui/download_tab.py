@@ -30,7 +30,7 @@ from src.gui.utils import (
 )
 
 # Import other required components
-from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded, get_model_with_versions
+from src.civitai_downloader import get_model_info_from_url, download_civitai_model, download_file, is_model_downloaded, get_model_with_versions, get_collection_models
 from src.progress_tracker import progress_manager, ProgressPhase, ProgressStats
 from src.enhanced_progress_bar import EnhancedProgressWidget
 
@@ -406,6 +406,14 @@ class DownloadTab:
             download_all_versions = self.download_mode_var.get() == "All versions"
 
             for url in urls:
+                collection_id = self._extract_collection_id(url)
+                if collection_id:
+                    handled = self._queue_collection(url, collection_id, api_key, download_path)
+                    if handled:
+                        continue
+                    self.log_message(f"Failed to queue collection URL: {url}")
+                    self.update_status_message(f"Unable to queue collection {collection_id}.")
+                    continue
                 if download_all_versions:
                     handled = self._queue_all_versions_for_url(url, api_key, download_path)
                     if handled:
@@ -505,6 +513,48 @@ class DownloadTab:
         self.log_message(f"No versions queued for model {model_id}.")
         return False
 
+    def _queue_collection(self, original_url, collection_id, api_key, download_path):
+        """Queue all models contained within a Civitai collection."""
+        models, collection_name, error = get_collection_models(collection_id, api_key)
+        if error or not models:
+            self.log_message(f"Failed to load collection {collection_id}: {error or 'No items found.'}")
+            self.update_status_message(f"Failed to queue collection {collection_id}.")
+            return False
+
+        base_name = collection_name or f"Collection {collection_id}"
+        queued = 0
+        seen = set()
+
+        for model in models:
+            model_id = model.get('model_id')
+            version_id = model.get('version_id')
+            if not model_id or not version_id:
+                continue
+            key = (model_id, version_id)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            version_url = self._build_version_url(original_url, model_id, version_id)
+            display_label = f"{base_name} - {model.get('model_name', model_id)} - {model.get('version_name', version_id)}"
+
+            self._enqueue_url_task(
+                version_url,
+                api_key,
+                download_path,
+                display_label=display_label
+            )
+            queued += 1
+
+        if queued:
+            message = f"Queued {queued} items from {base_name}."
+            self.log_message(message)
+            self.update_status_message(message)
+            return True
+
+        self.log_message(f"No items queued from collection {collection_id}.")
+        return False
+
     def _enqueue_url_task(self, url, api_key, download_path, display_label=None, enqueue=True, initial_state='queued'):
         """Create or update a task entry and optionally enqueue it for processing."""
         task_id = f"task_{uuid.uuid4().hex}"
@@ -551,6 +601,11 @@ class DownloadTab:
     def _extract_model_id(self, url):
         """Extract the model ID from a Civitai URL."""
         match = re.search(r'/models/(\\d+)', url)
+        return match.group(1) if match else None
+
+    def _extract_collection_id(self, url):
+        """Extract the collection ID from a Civitai URL."""
+        match = re.search(r'/collections/(\\d+)', url)
         return match.group(1) if match else None
 
     def _build_version_url(self, original_url, model_id, version_id):
@@ -809,4 +864,5 @@ def create_download_tab(parent_app, download_tab_frame):
         DownloadTab: Initialized download tab component
     """
     return DownloadTab(parent_app, download_tab_frame)
+
 

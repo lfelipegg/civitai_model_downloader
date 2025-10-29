@@ -1,4 +1,4 @@
-"""
+﻿"""
 Main window class for the Civitai Model Downloader GUI.
 
 This module contains the primary application window and its initialization.
@@ -40,7 +40,8 @@ from src.civitai_downloader import (
     download_civitai_model,
     download_file,
     is_model_downloaded,
-    get_model_with_versions
+    get_model_with_versions,
+    get_collection_models,
 )
 from src.history_manager import HistoryManager
 from src.progress_tracker import progress_manager, ProgressPhase, ProgressStats
@@ -398,10 +399,10 @@ class App(ctk.CTk):
         self.sort_label = ctk.CTkLabel(self.filters_frame, text="Sort by:")
         self.sort_label.grid(row=2, column=2, padx=5, pady=5, sticky="w")
         
-        self.sort_var = tk.StringVar(value="Date ↓")
+        self.sort_var = tk.StringVar(value="Date â†“")
         self.sort_menu = ctk.CTkOptionMenu(
             self.filters_frame,
-            values=["Date ↓", "Date ↑", "Name ↓", "Name ↑", "Size ↓", "Size ↑", "Type ↓", "Type ↑"],
+            values=["Date â†“", "Date â†‘", "Name â†“", "Name â†‘", "Size â†“", "Size â†‘", "Type â†“", "Type â†‘"],
             variable=self.sort_var,
             command=self._on_sort_changed
         )
@@ -531,6 +532,15 @@ class App(ctk.CTk):
             download_all_versions = self.download_scope_var.get() == "All versions"
 
             for url in urls:
+                collection_id = self._extract_collection_id(url)
+                if collection_id:
+                    handled = self._queue_collection(url, collection_id, api_key, download_path)
+                    if handled:
+                        continue
+                    self.log_message(f"Failed to queue collection URL: {url}")
+                    self.update_status_message(f"Unable to queue collection {collection_id}.")
+                    continue
+
                 if download_all_versions:
                     handled = self._queue_all_versions_for_url(url, api_key, download_path)
                     if handled:
@@ -662,9 +672,55 @@ class App(ctk.CTk):
         self.after(0, self._add_download_task_ui, task_id, url)
         return task_id
 
+    def _queue_collection(self, original_url, collection_id, api_key, download_path):
+        """Queue all models contained within a Civitai collection."""
+        models, collection_name, error = get_collection_models(collection_id, api_key)
+        if error or not models:
+            self.log_message(f"Failed to load collection {collection_id}: {error or 'No items found.'}")
+            self.update_status_message(f"Failed to load collection {collection_id}.")
+            return False
+
+        base_name = collection_name or f"Collection {collection_id}"
+        queued = 0
+        seen = set()
+
+        for model in models:
+            model_id = model.get('model_id')
+            version_id = model.get('version_id')
+            if not model_id or not version_id:
+                continue
+            key = (model_id, version_id)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            version_url = self._build_version_url(original_url, model_id, version_id)
+            display_label = f"{base_name} - {model.get('model_name', model_id)} - {model.get('version_name', version_id)}"
+
+            self._enqueue_url_task(
+                version_url,
+                api_key,
+                download_path,
+                display_label=display_label
+            )
+            queued += 1
+
+        if queued:
+            self.log_message(f"Queued {queued} items from {base_name}.")
+            self.update_status_message(f"Queued {queued} items from {base_name}.")
+            return True
+
+        self.log_message(f"No items queued from collection {collection_id}.")
+        return False
+
     def _extract_model_id(self, url):
         """Extract the model ID from a Civitai URL."""
         match = re.search(r'/models/(\d+)', url)
+        return match.group(1) if match else None
+
+    def _extract_collection_id(self, url):
+        """Extract the collection ID from a Civitai URL."""
+        match = re.search(r'/collections/(\d+)', url)
         return match.group(1) if match else None
 
     def _build_version_url(self, original_url, model_id, version_id):
@@ -692,7 +748,10 @@ class App(ctk.CTk):
         
         # Enhanced progress widget
         enhanced_progress = EnhancedProgressWidget(task_frame, task_id)
-        enhanced_progress.grid(row=1, column=0, columnspan=2, padx=5, pady=2, sticky="ew")
+        enhanced_progress.grid(row=1, column=0, columnspan=2, padx=5, pady=(2, 0), sticky="ew")
+
+        status_label = ctk.CTkLabel(task_frame, text="Status: Initializing...", anchor="w", font=ctk.CTkFont(size=11))
+        status_label.grid(row=2, column=0, columnspan=2, padx=5, pady=(0, 2), sticky="w")
         
         # Create progress tracker
         tracker = progress_manager.create_tracker(task_id)
@@ -705,7 +764,7 @@ class App(ctk.CTk):
             'progress_bar': enhanced_progress.progress_bar,  # For backward compatibility
             'enhanced_progress': enhanced_progress,
             'tracker': tracker,
-            'status_label': existing.get('status_label'),  # Might not exist; keep None
+            'status_label': status_label,
             'display_url': display_text,
             'url': existing.get('url', url), # Preserve original URL if set
             'stop_event': existing.get('stop_event', threading.Event()), # Per-task stop event
@@ -740,11 +799,11 @@ class App(ctk.CTk):
         cancel_button.grid(row=0, column=2, padx=2, pady=0, sticky="ew")
         self.download_tasks[task_id]['cancel_button'] = cancel_button
         # Add Move Up Button
-        move_up_button = ctk.CTkButton(button_frame, text="▲", command=lambda tid=task_id: self.move_task_up(tid), width=30)
+        move_up_button = ctk.CTkButton(button_frame, text="â–²", command=lambda tid=task_id: self.move_task_up(tid), width=30)
         move_up_button.grid(row=0, column=3, padx=2, pady=0, sticky="ew")
         self.download_tasks[task_id]['move_up_button'] = move_up_button
         # Add Move Down Button
-        move_down_button = ctk.CTkButton(button_frame, text="▼", command=lambda tid=task_id: self.move_task_down(tid), width=30)
+        move_down_button = ctk.CTkButton(button_frame, text="â–¼", command=lambda tid=task_id: self.move_task_down(tid), width=30)
         move_down_button.grid(row=0, column=4, padx=2, pady=0, sticky="ew")
         self.download_tasks[task_id]['move_down_button'] = move_down_button
     
@@ -1056,11 +1115,18 @@ class App(ctk.CTk):
     def _safe_update_status(self, task_id, status_text, text_color=None):
         """Safely update task status with error handling"""
         try:
-            if task_id in self.download_tasks:
-                if text_color:
-                    self.download_tasks[task_id]['status_label'].configure(text=status_text, text_color=text_color)
-                else:
-                    self.download_tasks[task_id]['status_label'].configure(text=status_text)
+            task = self.download_tasks.get(task_id)
+            if not task:
+                return
+
+            status_label = task.get('status_label')
+            if status_label is None:
+                return
+
+            if text_color:
+                status_label.configure(text=status_text, text_color=text_color)
+            else:
+                status_label.configure(text=status_text)
         except Exception as e:
             print(f"Error updating status for task {task_id}: {e}")
     
@@ -1254,16 +1320,16 @@ class App(ctk.CTk):
     
     def _on_sort_changed(self, value):
         """Handle sort order changes."""
-        # Parse sort value (e.g., "Date ↓" -> "download_date", "desc")
+        # Parse sort value (e.g., "Date â†“" -> "download_date", "desc")
         sort_mapping = {
-            "Date ↓": ("download_date", "desc"),
-            "Date ↑": ("download_date", "asc"),
-            "Name ↓": ("model_name", "desc"),
-            "Name ↑": ("model_name", "asc"),
-            "Size ↓": ("file_size", "desc"),
-            "Size ↑": ("file_size", "asc"),
-            "Type ↓": ("model_type", "desc"),
-            "Type ↑": ("model_type", "asc")
+            "Date â†“": ("download_date", "desc"),
+            "Date â†‘": ("download_date", "asc"),
+            "Name â†“": ("model_name", "desc"),
+            "Name â†‘": ("model_name", "asc"),
+            "Size â†“": ("file_size", "desc"),
+            "Size â†‘": ("file_size", "asc"),
+            "Type â†“": ("model_type", "desc"),
+            "Type â†‘": ("model_type", "asc")
         }
         
         if value in sort_mapping:
@@ -1547,7 +1613,7 @@ class App(ctk.CTk):
         # Sort chip
         if hasattr(self, 'sort_var'):
             sort_text = self.sort_var.get()
-            if sort_text != "Date ↓":  # Only show if not default
+            if sort_text != "Date â†“":  # Only show if not default
                 chip = ctk.CTkLabel(
                     self.active_filters_frame,
                     text=f"Sort: {sort_text}",
@@ -1605,7 +1671,7 @@ class App(ctk.CTk):
         self.triggers_var.set(False)
         
         # Reset sort to default
-        self.sort_var.set("Date ↓")
+        self.sort_var.set("Date â†“")
         self.current_sort_by = "download_date"
         self.current_sort_order = "desc"
         
@@ -1775,3 +1841,4 @@ class App(ctk.CTk):
 if __name__ == "__main__":
     app = App()
     app.mainloop()
+

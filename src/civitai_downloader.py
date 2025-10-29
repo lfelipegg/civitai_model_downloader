@@ -3,9 +3,10 @@ import requests
 import re
 import time
 import hashlib
+import json
 from functools import wraps
 import shutil
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 
 CIVITAI_BASE_URL = "https://civitai.com/api/v1"
 DESCRIPTION_MEDIA_PATTERN = re.compile(
@@ -239,6 +240,153 @@ def get_model_with_versions(model_id, api_key=None):
         return None, f"Network Error: Could not connect to Civitai API. {e}"
 
 
+def get_collection_models(collection_id, api_key=None):
+    """
+    Fetch models contained within a collection.
+
+    Returns:
+        Tuple[List[Dict], str, Optional[str]]: (models, collection_name, error_message)
+    """
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    collection_name = None
+
+    try:
+        numeric_collection_id = int(str(collection_id))
+    except (TypeError, ValueError):
+        return None, "", f"Invalid collection ID: {collection_id}"
+
+    @retry(
+        exceptions=(requests.exceptions.HTTPError, requests.exceptions.RequestException),
+        tries=3,
+        delay=2,
+        backoff=2,
+    )
+    def _get_with_retry(url, headers, params=None):
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        return response
+
+    # Attempt to fetch collection metadata for display purposes and existence check.
+    trpc_url = "https://civitai.com/api/trpc/collection.getById"
+    trpc_params = {"input": json.dumps({"json": {"id": numeric_collection_id}})}
+
+    try:
+        metadata_response = _get_with_retry(trpc_url, headers, trpc_params)
+        metadata_json = metadata_response.json()
+        payload = (
+            metadata_json.get("result", {})
+            .get("data", {})
+            .get("json", {})
+            or {}
+        )
+        collection_info = payload.get("collection") or {}
+        permissions = payload.get("permissions") or {}
+
+        if not collection_info:
+            if not permissions.get("read", True):
+                return (
+                    None,
+                    "",
+                    f"Collection with ID {collection_id} is private or inaccessible.",
+                )
+            return None, "", f"Not Found: Collection with ID {collection_id} not found."
+
+        collection_name = (
+            collection_info.get("name")
+            or collection_info.get("title")
+            or f"Collection {collection_id}"
+        )
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code
+        if status == 401:
+            return None, "", "Unauthorized: Invalid API Key or missing authentication."
+        if status == 404:
+            return None, "", f"Not Found: Collection with ID {collection_id} not found."
+        if status == 429:
+            return None, "", "Too Many Requests: Rate limit exceeded. Please wait and try again."
+        return None, "", f"HTTP Error: {status} - {e.response.reason}"
+    except requests.exceptions.RequestException as e:
+        return None, "", f"Network Error: Could not connect to Civitai API. {e}"
+
+    models = []
+    cursor = None
+    seen_cursors = set()
+
+    while True:
+        params = {
+            "collectionIds": numeric_collection_id,
+            "limit": 100,
+        }
+        if cursor:
+            params["cursor"] = cursor
+
+        try:
+            response = _get_with_retry(f"{CIVITAI_BASE_URL}/models", headers, params)
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code
+            if status == 401:
+                return None, "", "Unauthorized: Invalid API Key or missing authentication."
+            if status == 404:
+                return None, "", f"Not Found: Collection with ID {collection_id} not found."
+            if status == 429:
+                return None, "", "Too Many Requests: Rate limit exceeded. Please wait and try again."
+            return None, "", f"HTTP Error: {status} - {e.response.reason}"
+        except requests.exceptions.RequestException as e:
+            return None, "", f"Network Error: Could not connect to Civitai API. {e}"
+
+        data = response.json()
+        items = data.get("items") or []
+
+        for item in items:
+            model_id = item.get("id")
+            model_name = item.get("name") or (f"Model {model_id}" if model_id else None)
+
+            version_data = next(
+                (
+                    version
+                    for version in (item.get("modelVersions") or [])
+                    if version.get("id")
+                ),
+                None,
+            )
+
+            if not model_id or not version_data:
+                continue
+
+            version_id = version_data.get("id")
+            models.append(
+                {
+                    "model_id": str(model_id),
+                    "model_name": model_name or f"Model {model_id}",
+                    "version_id": str(version_id),
+                    "version_name": version_data.get("name")
+                    or f"Version {version_id}",
+                }
+            )
+
+        metadata = data.get("metadata") or {}
+        next_cursor = metadata.get("nextCursor")
+
+        if not next_cursor:
+            next_page = metadata.get("nextPage")
+            if next_page:
+                parsed = urlparse(next_page)
+                cursor_values = parse_qs(parsed.query).get("cursor") or []
+                if cursor_values:
+                    next_cursor = cursor_values[0]
+
+        if not next_cursor or next_cursor in seen_cursors:
+            break
+
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+
+    if not models:
+        return None, collection_name or f"Collection {collection_id}", "No downloadable models found in this collection."
+
+    return models, collection_name or f"Collection {collection_id}", None
+
+
 def get_model_info_from_url(url, api_key):
     """
     Extracts model information from a Civitai URL.
@@ -363,7 +511,6 @@ def download_file(url, path, api_key=None, progress_callback=None, expected_sha2
 
 def save_metadata(metadata, path):
     """Saves metadata to a JSON file."""
-    import json
     print(f"Saving metadata to {path}")
     with open(path, 'w') as f:
         json.dump(metadata, f, indent=4)
