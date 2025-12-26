@@ -640,13 +640,13 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
         required_bytes = model_file['sizeKB'] * 1024 # Convert KB to bytes
         disk_space_error = check_disk_space(target_dir, required_bytes)
         if disk_space_error:
-            return disk_space_error
+            return disk_space_error, None
 
         download_error = download_file(model_download_url, os.path.join(target_dir, model_filename), api_key, progress_callback=progress_callback, expected_sha256=expected_sha256, stop_event=stop_event, pause_event=pause_event)
         if download_error:
-            return f"Failed to download model file: {download_error}"
+            return f"Failed to download model file: {download_error}", None
     else:
-        return f"No main model file found for {model_name} v{model_version_name}"
+        return f"No main model file found for {model_name} v{model_version_name}", None
 
     # Download images
     if 'images' in model_info:

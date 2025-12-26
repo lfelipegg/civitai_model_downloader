@@ -165,16 +165,22 @@ class HistoryManager:
         """Apply filter criteria to a download entry."""
         
         # Model type filter
-        if filters.get("model_types") and download.get("model_type") not in filters["model_types"]:
+        model_types = filters.get("model_types")
+        if not model_types and filters.get("model_type"):
+            model_types = [filters.get("model_type")]
+        if model_types and download.get("model_type") not in model_types:
             return False
             
         # Base model filter
-        if filters.get("base_models") and download.get("base_model") not in filters["base_models"]:
+        base_models = filters.get("base_models")
+        if not base_models and filters.get("base_model"):
+            base_models = [filters.get("base_model")]
+        if base_models and download.get("base_model") not in base_models:
             return False
             
         # Date range filter
-        date_from = filters.get("date_from")
-        date_to = filters.get("date_to")
+        date_from = self._parse_date_filter(filters.get("date_from"))
+        date_to = self._parse_date_filter(filters.get("date_to"), is_end=True)
         if date_from or date_to:
             try:
                 download_date = datetime.fromisoformat(download.get("download_date", "").replace('Z', '+00:00'))
@@ -190,9 +196,15 @@ class HistoryManager:
         size_max = filters.get("size_max")
         if size_min is not None or size_max is not None:
             file_size_mb = download.get("file_size", 0) / (1024 * 1024)
-            if size_min is not None and file_size_mb < size_min:
+            try:
+                size_min_val = float(size_min) if size_min is not None else None
+                size_max_val = float(size_max) if size_max is not None else None
+            except (TypeError, ValueError):
+                size_min_val = None
+                size_max_val = None
+            if size_min_val is not None and file_size_mb < size_min_val:
                 return False
-            if size_max is not None and file_size_mb > size_max:
+            if size_max_val is not None and file_size_mb > size_max_val:
                 return False
         
         # Has trigger words filter
@@ -202,6 +214,29 @@ class HistoryManager:
                 return False
                 
         return True
+
+    def _parse_date_filter(self, value, is_end: bool = False) -> Optional[datetime]:
+        """Parse a date filter value into a datetime."""
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            value = value.replace('Z', '+00:00')
+            try:
+                dt = datetime.fromisoformat(value)
+            except ValueError:
+                try:
+                    dt = datetime.strptime(value, "%Y-%m-%d")
+                except ValueError:
+                    return None
+            if is_end and len(value) <= 10:
+                dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+            return dt
+        return None
     
     def _sort_downloads(self, downloads: List[Dict[str, Any]], sort_by: str, sort_order: str) -> List[Dict[str, Any]]:
         """Sort downloads by specified criteria."""

@@ -1,59 +1,54 @@
 """
-History tab component for the Civitai Model Downloader GUI.
-
-This module contains all the history tab related functionality.
+History tab UI and filtering.
 """
 
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import os
-from datetime import datetime
 import threading
-import time
 
-# Import utilities
-from src.gui.utils import (
-    validate_path,
-    open_folder_cross_platform
-)
-
-# Import other required components
-from src.history_manager import HistoryManager
+from src.gui.utils import open_folder_cross_platform, validate_path
+from src.services.history_service import HistoryService
 from src.thumbnail_manager import thumbnail_manager
 from src.enhanced_progress_bar import ThumbnailWidget
 
 
 class HistoryTab:
-    """History tab component for the main application."""
-    
-    def __init__(self, parent_app, history_tab_frame):
-        """
-        Initialize the history tab component.
-        
-        Args:
-            parent_app: The main application instance
-            history_tab_frame: The tkinter frame for the history tab
-        """
-        self.parent_app = parent_app
-        self.history_tab_frame = history_tab_frame
-        
-        # Initialize history tab specific attributes
-        self.current_filters = {}
-        self.current_sort_by = "download_date"
-        self.current_sort_order = "desc"
-        
-        # Setup history tab
+    """History tab UI and filtering."""
+
+    def __init__(self, root, frame, history_service=None, history_manager=None, download_path_getter=None):
+        self.root = root
+        self.history_tab = frame
+        if history_service is None:
+            history_service = HistoryService(history_manager=history_manager)
+        self.history_service = history_service
+        self._download_path_getter = download_path_getter
+
         self._setup_history_tab()
-    
+
+    def after(self, *args, **kwargs):
+        return self.root.after(*args, **kwargs)
+
+    def after_idle(self, *args, **kwargs):
+        return self.root.after_idle(*args, **kwargs)
+
+    def after_cancel(self, *args, **kwargs):
+        return self.root.after_cancel(*args, **kwargs)
+
+    def _get_download_path(self):
+        if self._download_path_getter:
+            return (self._download_path_getter() or '').strip()
+        return ""
+
     def _setup_history_tab(self):
-        """Setup the history tab UI components."""
+        """Setup the download history tab."""
         # Configure grid layout for history tab
-        self.history_tab_frame.grid_columnconfigure(0, weight=1)
-        self.history_tab_frame.grid_rowconfigure(3, weight=1)  # Updated for new filter frame
+        self.history_tab.grid_columnconfigure(0, weight=1)
+        self.history_tab.grid_rowconfigure(3, weight=1)  # Updated for new filter frame
         
         # Search frame
-        self.search_frame = ctk.CTkFrame(self.history_tab_frame)
+        self.search_frame = ctk.CTkFrame(self.history_tab)
         self.search_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
         self.search_frame.grid_columnconfigure(1, weight=1)
         
@@ -71,7 +66,7 @@ class HistoryTab:
         self.refresh_button.grid(row=0, column=3, padx=5, pady=10)
         
         # Advanced filters frame
-        self.filters_frame = ctk.CTkFrame(self.history_tab_frame)
+        self.filters_frame = ctk.CTkFrame(self.history_tab)
         self.filters_frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
         self.filters_frame.grid_columnconfigure(0, weight=1)
         self.filters_frame.grid_columnconfigure(1, weight=1)
@@ -86,7 +81,7 @@ class HistoryTab:
         self._setup_filter_controls()
         
         # Control buttons frame
-        self.history_controls_frame = ctk.CTkFrame(self.history_tab_frame)
+        self.history_controls_frame = ctk.CTkFrame(self.history_tab)
         self.history_controls_frame.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
         
         self.scan_button = ctk.CTkButton(self.history_controls_frame, text="Scan Downloads", command=self.scan_downloads)
@@ -107,13 +102,14 @@ class HistoryTab:
         self.active_filters_frame.grid(row=1, column=0, columnspan=4, padx=5, pady=5, sticky="ew")
         
         # History display
-        self.history_frame = ctk.CTkScrollableFrame(self.history_tab_frame, label_text="Download History")
+        self.history_frame = ctk.CTkScrollableFrame(self.history_tab, label_text="Download History")
         self.history_frame.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
         self.history_frame.grid_columnconfigure(0, weight=1)
         
         # Load initial history
         self.refresh_history()
     
+
     def _setup_filter_controls(self):
         """Setup advanced filter controls."""
         
@@ -179,10 +175,10 @@ class HistoryTab:
         self.sort_label = ctk.CTkLabel(self.filters_frame, text="Sort by:")
         self.sort_label.grid(row=2, column=2, padx=5, pady=5, sticky="w")
         
-        self.sort_var = tk.StringVar(value="Date ↓")
+        self.sort_var = tk.StringVar(value="Date â†“")
         self.sort_menu = ctk.CTkOptionMenu(
             self.filters_frame,
-            values=["Date ↓", "Date ↑", "Name ↓", "Name ↑", "Size ↓", "Size ↑", "Type ↓", "Type ↑"],
+            values=["Date â†“", "Date â†‘", "Name â†“", "Name â†‘", "Size â†“", "Size â†‘", "Type â†“", "Type â†‘"],
             variable=self.sort_var,
             command=self._on_sort_changed
         )
@@ -210,42 +206,65 @@ class HistoryTab:
         
         # Update filter options
         self._update_filter_options()
+
+
+    def refresh_history(self):
+        """Refresh the history display."""
+        # Update filter options first
+        self._update_filter_options()
+        
+        # Clear existing history items
+        for widget in self.history_frame.winfo_children():
+            widget.destroy()
+        
+        # Clean up thumbnail cache periodically
+        try:
+            thumbnail_manager.cleanup_cache()
+        except Exception as e:
+            print(f"Error during thumbnail cache cleanup: {e}")
+        
+        # Use the enhanced search to display all downloads with current filters
+        self._perform_filtered_search()
     
+
     def search_history(self):
         """Search through download history (legacy method - now redirects to enhanced search)."""
         # Use the new enhanced search method
         self._perform_filtered_search()
     
+
     def _on_search_changed(self, event=None):
         """Handle search entry changes with debouncing."""
         # Cancel any pending search
-        if hasattr(self.parent_app, '_search_after_id'):
-            self.parent_app.after_cancel(self.parent_app._search_after_id)
+        if hasattr(self, '_search_after_id'):
+            self.after_cancel(self._search_after_id)
         
         # Schedule a new search after 300ms of inactivity (reduced for faster response)
-        self.parent_app._search_after_id = self.parent_app.after(300, self._perform_filtered_search)
+        self._search_after_id = self.after(300, self._perform_filtered_search)
     
+
     def _on_filter_changed(self, *args):
         """Handle filter changes with debouncing."""
         # Cancel any pending search
-        if hasattr(self.parent_app, '_search_after_id'):
-            self.parent_app.after_cancel(self.parent_app._search_after_id)
+        if hasattr(self, '_search_after_id'):
+            self.after_cancel(self._search_after_id)
         
         # Schedule a new search after 300ms of inactivity
-        self.parent_app._search_after_id = self.parent_app.after(300, self._perform_filtered_search)
+        self._search_after_id = self.after(300, self._perform_filtered_search)
     
+
     def _on_sort_changed(self, value):
         """Handle sort order changes."""
-        # Parse sort value (e.g., "Date ↓" -> "download_date", "desc")
+        # Parse sort value (e.g., "Date â†“" -> "download_date", "desc")
         sort_mapping = {
-            "Date ↓": ("download_date", "desc"),
-            "Date ↑": ("download_date", "asc"),
-            "Name ↓": ("model_name", "desc"),
-            "Name ↑": ("model_name", "asc"),
-            "Size ↓": ("file_size", "desc"),
-            "Size ↑": ("file_size", "asc"),
-            "Type ↓": ("model_type", "desc"),
-            "Type ↑": ("model_type", "asc")
+            "Date â†“": ("download_date", "desc"),
+            "Date â†‘": ("download_date", "asc"),
+            "Name â†“": ("model_name", "desc"),
+            "Name â†‘": ("model_name", "asc"),
+            "Size â†“": ("file_size", "desc"),
+            "Size â†‘": ("file_size", "asc"),
+            "Type â†“": ("model_type", "desc"),
+            "Type â†‘": ("model_type", "asc")
         }
         
         if value in sort_mapping:
@@ -254,6 +273,7 @@ class HistoryTab:
         # Trigger immediate search
         self._perform_filtered_search()
     
+
     def _perform_filtered_search(self):
         """Perform search with current filters and sorting."""
         query = self.search_entry.get().strip()
@@ -284,14 +304,14 @@ class HistoryTab:
         size_min = self.size_min_entry.get().strip()
         if size_min:
             try:
-                filters['size_min'] = float(size_min) * 1024 * 1024  # Convert MB to bytes
+                filters['size_min'] = float(size_min)
             except ValueError:
                 pass  # Invalid input, ignore
         
         size_max = self.size_max_entry.get().strip()
         if size_max:
             try:
-                filters['size_max'] = float(size_max) * 1024 * 1024  # Convert MB to bytes
+                filters['size_max'] = float(size_max)
             except ValueError:
                 pass  # Invalid input, ignore
         
@@ -307,7 +327,7 @@ class HistoryTab:
             widget.destroy()
         
         # Perform search with filters
-        downloads = self.parent_app.history_manager.search_downloads(
+        downloads = self.history_service.search_downloads(
             query=query,
             filters=filters,
             sort_by=self.current_sort_by,
@@ -318,7 +338,7 @@ class HistoryTab:
         if query or filters:
             self.stats_label.configure(text=f"Found {len(downloads)} matches")
         else:
-            stats = self.parent_app.history_manager.get_stats()
+            stats = self.history_service.get_stats()
             total_size_mb = stats['total_size'] / (1024 * 1024)
             self.stats_label.configure(
                 text=f"Total: {stats['total_downloads']} models, {total_size_mb:.1f} MB"
@@ -336,6 +356,7 @@ class HistoryTab:
         # Update active filters display
         self._update_active_filters_display()
     
+
     def _create_history_item_with_highlight(self, download, row, search_query=""):
         """Create a GUI item for a download history entry with search highlighting."""
         # Main frame for the history item
@@ -395,6 +416,7 @@ class HistoryTab:
         
         # Format date
         try:
+            from datetime import datetime
             dt = datetime.fromisoformat(download_date.replace('Z', '+00:00'))
             formatted_date = dt.strftime('%Y-%m-%d %H:%M')
         except:
@@ -438,7 +460,7 @@ class HistoryTab:
         
         # Buttons frame (adjusted for thumbnail)
         buttons_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
-        buttons_frame.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+        buttons_frame.grid(row=1, columnspan=2, padx=5, pady=5, sticky="ew")
         
         # Open folder button
         open_btn = ctk.CTkButton(
@@ -472,6 +494,7 @@ class HistoryTab:
         )
         delete_btn.grid(row=0, column=2, padx=2)
     
+
     def _update_active_filters_display(self):
         """Update the display of active filters."""
         # Clear existing filter chips
@@ -509,8 +532,7 @@ class HistoryTab:
             if filter_key in self.current_filters:
                 value = self.current_filters[filter_key]
                 if filter_key in ['size_min', 'size_max']:
-                    # Convert bytes back to MB for display
-                    value = f"{value / (1024 * 1024):.1f} MB"
+                    value = f"{float(value):.1f} MB"
                 elif filter_key == 'has_trigger_words':
                     value = "Yes"
                 
@@ -526,9 +548,9 @@ class HistoryTab:
                 active_count += 1
         
         # Sort chip
-        if hasattr(self.parent_app, 'sort_var'):
-            sort_text = self.parent_app.sort_var.get()
-            if sort_text != "Date ↓":  # Only show if not default
+        if hasattr(self, 'sort_var'):
+            sort_text = self.sort_var.get()
+            if sort_text != "Date â†“":  # Only show if not default
                 chip = ctk.CTkLabel(
                     self.active_filters_frame,
                     text=f"Sort: {sort_text}",
@@ -549,10 +571,11 @@ class HistoryTab:
             )
             no_filters_label.grid(row=0, column=0, padx=5, pady=2)
     
+
     def _update_filter_options(self):
         """Update the dropdown options based on available data."""
         try:
-            options = self.parent_app.history_manager.get_filter_options()
+            options = self.history_service.get_filter_options()
             
             # Update model type dropdown
             model_types = ["All"] + options.get('model_types', [])
@@ -565,6 +588,7 @@ class HistoryTab:
         except Exception as e:
             print(f"Error updating filter options: {e}")
     
+
     def clear_filters(self):
         """Clear all filters and reset search."""
         # Clear search entry
@@ -586,7 +610,7 @@ class HistoryTab:
         self.triggers_var.set(False)
         
         # Reset sort to default
-        self.sort_var.set("Date ↓")
+        self.sort_var.set("Date â†“")
         self.current_sort_by = "download_date"
         self.current_sort_order = "desc"
         
@@ -596,27 +620,10 @@ class HistoryTab:
         # Refresh history display
         self.refresh_history()
     
-    def refresh_history(self):
-        """Refresh the history display."""
-        # Update filter options first
-        self._update_filter_options()
-        
-        # Clear existing history items
-        for widget in self.history_frame.winfo_children():
-            widget.destroy()
-        
-        # Clean up thumbnail cache periodically
-        try:
-            thumbnail_manager.cleanup_cache()
-        except Exception as e:
-            print(f"Error during thumbnail cache cleanup: {e}")
-        
-        # Use the enhanced search to display all downloads with current filters
-        self._perform_filtered_search()
-    
+
     def scan_downloads(self):
         """Scan the download directory to populate history."""
-        download_path = self.parent_app.download_path_entry.get()
+        download_path = self._get_download_path()
         if not download_path:
             messagebox.showerror("Error", "Please set a download path first.")
             return
@@ -626,10 +633,10 @@ class HistoryTab:
             return
         
         # Show progress dialog
-        progress_dialog = ctk.CTkToplevel(self.parent_app)
+        progress_dialog = ctk.CTkToplevel(self.root)
         progress_dialog.title("Scanning Downloads")
         progress_dialog.geometry("300x100")
-        progress_dialog.transient(self.parent_app)
+        progress_dialog.transient(self.root)
         progress_dialog.grab_set()
         
         progress_label = ctk.CTkLabel(progress_dialog, text="Scanning download directory...")
@@ -637,16 +644,17 @@ class HistoryTab:
         
         def scan_in_thread():
             try:
-                self.parent_app.history_manager.scan_and_populate_history(download_path)
-                self.parent_app.after(0, lambda: [progress_dialog.destroy(), self.refresh_history(),
+                self.history_service.scan_and_populate_history(download_path)
+                self.after(0, lambda: [progress_dialog.destroy(), self.refresh_history(),
                                      messagebox.showinfo("Scan Complete", "Download directory scan completed.")])
             except Exception as e:
-                self.parent_app.after(0, lambda: [progress_dialog.destroy(),
+                self.after(0, lambda: [progress_dialog.destroy(),
                                      messagebox.showerror("Scan Error", f"Error during scan: {e}")])
         
         scan_thread = threading.Thread(target=scan_in_thread, daemon=True)
         scan_thread.start()
     
+
     def export_history(self):
         """Export download history to a file."""
         filename = filedialog.asksaveasfilename(
@@ -656,11 +664,12 @@ class HistoryTab:
         )
         
         if filename:
-            if self.parent_app.history_manager.export_history(filename):
+            if self.history_service.export_history(filename):
                 messagebox.showinfo("Export Success", f"History exported to {filename}")
             else:
                 messagebox.showerror("Export Error", "Failed to export history")
     
+
     def import_history(self):
         """Import download history from a file."""
         filename = filedialog.askopenfilename(
@@ -674,12 +683,13 @@ class HistoryTab:
                 "Do you want to merge with existing history?\n\nYes = Merge (add new entries)\nNo = Replace (overwrite existing history)"
             )
             
-            if self.parent_app.history_manager.import_history(filename, merge=merge):
+            if self.history_service.import_history(filename, merge=merge):
                 self.refresh_history()
                 messagebox.showinfo("Import Success", "History imported successfully")
             else:
                 messagebox.showerror("Import Error", "Failed to import history")
     
+
     def open_model_folder(self, download):
         """Open the model's download folder."""
         download_path = download.get('download_path')
@@ -689,6 +699,7 @@ class HistoryTab:
         
         if not open_folder_cross_platform(download_path):
             messagebox.showerror("Error", "Could not open folder.")
+
 
     def view_model_report(self, download):
         """Open the model's HTML report."""
@@ -703,16 +714,17 @@ class HistoryTab:
         except Exception as e:
             messagebox.showerror("Error", f"Could not open report: {e}")
     
+
     def delete_model_entry(self, download):
         """Delete a model entry with confirmation."""
         model_name = download.get('model_name', 'Unknown')
         version_name = download.get('version_name', 'Unknown')
         
         # Create custom dialog
-        dialog = ctk.CTkToplevel(self.parent_app)
+        dialog = ctk.CTkToplevel(self.root)
         dialog.title("Delete Model")
         dialog.geometry("400x200")
-        dialog.transient(self.parent_app)
+        dialog.transient(self.root)
         dialog.grab_set()
         
         # Center the dialog
@@ -748,7 +760,7 @@ class HistoryTab:
             dialog.destroy()
             delete_files = delete_files_var.get()
             
-            if self.parent_app.history_manager.delete_download_entry(download['id'], delete_files=delete_files):
+            if self.history_service.delete_download_entry(download['id'], delete_files=delete_files):
                 self.refresh_history()
                 action_text = "and files " if delete_files else ""
                 messagebox.showinfo("Deleted", f"Model entry {action_text}deleted successfully")
@@ -771,16 +783,6 @@ class HistoryTab:
         delete_btn.pack(side="right", padx=5)
 
 
-# This would be used by the main application to initialize the history tab
-def create_history_tab(parent_app, history_tab_frame):
-    """
-    Factory function to create and initialize the history tab.
-    
-    Args:
-        parent_app: The main application instance
-        history_tab_frame: The tkinter frame for the history tab
-        
-    Returns:
-        HistoryTab: Initialized history tab component
-    """
-    return HistoryTab(parent_app, history_tab_frame)
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()

@@ -5,7 +5,7 @@ This package contains all GUI-related components organized in a modular structur
 """
 
 # Import and expose the main application class
-from .main_window import App
+from .app import App
 
 # Export public API
 __all__ = ['App']
