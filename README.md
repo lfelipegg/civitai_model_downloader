@@ -26,6 +26,9 @@ Setup
 3) (Optional) Set environment variables in `.env`:
    - `CIVITAI_API_KEY` (optional but recommended)
    - `DOWNLOAD_PATH` (default is current working directory)
+   - `MAX_PARALLEL_DOWNLOADS` (default 1)
+   - `DOWNLOAD_RETRY_COUNT` (default 2)
+   - `BANDWIDTH_LIMIT_KBPS` (0 = unlimited)
 
 Run
 ---

@@ -2,3 +2,5 @@ python-dotenv
 requests
 customtkinter
 Pillow>=9.0.0
+streamlit
+streamlit-autorefresh

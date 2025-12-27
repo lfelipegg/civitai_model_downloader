@@ -2,25 +2,83 @@ import os
 import json
 import html
 
-def generate_html_report(model_info, output_dir):
+def generate_html_report(model_info, output_dir, model_data=None):
     """
     Generates an HTML report for a downloaded Civitai model.
     """
-    model_name = model_info['model']['name']
-    model_version_name = model_info['name']
-    model_type = model_info['model']['type']
-    download_count = model_info['stats']['downloadCount']
-    thumbs_up_count = model_info['stats']['thumbsUpCount']
-    rating = model_info['stats']['rating']
-    rating_count = model_info['stats']['ratingCount']
-    published_at = model_info['publishedAt'].split('T')[0] if 'publishedAt' in model_info else 'N/A'
-    base_model = model_info.get('baseModel', 'N/A')
-    trained_words = model_info.get('trainedWords', [])
-    usage_tips = model_info.get('usageTips', 'N/A')
+    model_data = model_data or {}
+    model_section = model_info.get('model', {}) if isinstance(model_info, dict) else {}
+    stats = model_info.get('stats') or model_data.get('stats') or {}
+
+    def safe_date(value):
+        if not value:
+            return "N/A"
+        if isinstance(value, str):
+            return value.split('T')[0]
+        return str(value)
+
+    def safe_number(value, default=0.0):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def normalize_list(value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
+
+    model_id = (
+        model_info.get('modelId')
+        or model_data.get('id')
+        or model_section.get('id')
+    )
+    version_id = model_info.get('id')
+
+    model_name = model_section.get('name') or model_data.get('name') or 'Unknown Model'
+    model_version_name = model_info.get('name') or 'Unknown Version'
+    model_type = model_section.get('type') or model_data.get('type') or 'Unknown'
+    download_count = int(stats.get('downloadCount') or 0)
+    thumbs_up_count = int(stats.get('thumbsUpCount') or 0)
+    rating_value = safe_number(stats.get('rating'), 0.0)
+    rating_count = int(stats.get('ratingCount') or 0)
+    published_at = safe_date(
+        model_info.get('publishedAt')
+        or model_data.get('publishedAt')
+        or model_info.get('createdAt')
+        or model_data.get('createdAt')
+    )
+    base_model = model_info.get('baseModel') or model_data.get('baseModel') or 'N/A'
+    trained_words = normalize_list(model_info.get('trainedWords'))
+    usage_tips = model_info.get('usageTips') or model_data.get('usageTips') or 'N/A'
+    if isinstance(usage_tips, list):
+        usage_tips = ", ".join(str(item) for item in usage_tips if str(item).strip()) or "N/A"
     description = (
         model_info.get('description')
-        or model_info.get('model', {}).get('description')
+        or model_data.get('description')
+        or model_section.get('description')
     )
+    model_tags = normalize_list(
+        model_data.get('tags')
+        or model_section.get('tags')
+        or model_info.get('tags')
+    )
+    creator = (
+        (model_data.get('creator') or {}).get('username')
+        or (model_section.get('creator') or {}).get('username')
+        or "N/A"
+    )
+    nsfw = model_data.get('nsfw')
+    poi = model_data.get('poi')
+    allow_no_credit = model_data.get('allowNoCredit')
+    nsfw_label = "Yes" if nsfw is True else "No" if nsfw is False else "N/A"
+    poi_label = "Yes" if poi is True else "No" if poi is False else "N/A"
+    allow_no_credit_label = "Yes" if allow_no_credit is True else "No" if allow_no_credit is False else "N/A"
+    model_id_label = model_id if model_id is not None else "N/A"
+    version_id_label = version_id if version_id is not None else "N/A"
+    rating_label = f"{rating_value:.2f}"
     if not description:
         description_path = os.path.join(output_dir, "description.md")
         if os.path.exists(description_path):
@@ -33,6 +91,67 @@ def generate_html_report(model_info, output_dir):
                 print(f"Warning: Unable to load description from {description_path}: {e}")
     if not description:
         description = 'No description provided.'
+
+    trained_words = [str(word).strip() for word in trained_words if str(word).strip()]
+    trigger_words_html = (
+        "".join([f"<li>{html.escape(word)}</li>" for word in trained_words])
+        if trained_words
+        else "<li>No trigger words specified.</li>"
+    )
+    tags_html = (
+        "".join([f"<span class=\"tag\">{html.escape(str(tag))}</span>" for tag in model_tags if str(tag).strip()])
+        if model_tags
+        else "<span class=\"tag\">No tags available.</span>"
+    )
+
+    def format_model_file(file_info):
+        if not isinstance(file_info, dict):
+            return ""
+        size_kb = file_info.get('sizeKB') or 0
+        try:
+            size_mb = float(size_kb) / 1024
+        except (TypeError, ValueError):
+            size_mb = 0
+        scanned_at = safe_date(file_info.get('scannedAt'))
+        hashes = file_info.get('hashes') or {}
+        return f'''
+            <div class="model-file">
+                <p><strong>Name:</strong> {html.escape(str(file_info.get('name', 'Unknown')))}</p>
+                <p><strong>Type:</strong> {html.escape(str(file_info.get('type', 'N/A')))}</p>
+                <p><strong>Size:</strong> {size_mb:.2f} MB</p>
+                <p><strong>Primary:</strong> {'Yes' if file_info.get('primary') else 'No'}</p>
+                <p><strong>Scanned:</strong> {scanned_at}</p>
+                <p><strong>Pickle Scan:</strong> {html.escape(str(file_info.get('pickleScanResult', 'N/A')))}</p>
+                <p><strong>Virus Scan:</strong> {html.escape(str(file_info.get('virusScanResult', 'N/A')))}</p>
+                <p><strong>SHA256:</strong> {html.escape(str(hashes.get('SHA256', 'N/A')))}</p>
+                <p><a href="{file_info.get('downloadUrl', '#')}" target="_blank">Download</a></p>
+            </div>
+            '''
+
+    model_files = model_info.get('files') or []
+    model_files_html = "".join(
+        [format_model_file(file_info) for file_info in model_files if isinstance(file_info, dict)]
+    )
+    if not model_files_html:
+        model_files_html = '<p>No model files available.</p>'
+
+    version_count = len(model_data.get('modelVersions') or []) if model_data else 0
+    version_count_label = str(version_count) if version_count else "N/A"
+
+    model_link = ""
+    version_link = ""
+    if model_id:
+        model_link = f'<a href="https://civitai.com/models/{model_id}" target="_blank">View Model on Civitai</a>'
+        if version_id:
+            version_link = f'<a href="https://civitai.com/models/{model_id}?modelVersionId={version_id}" target="_blank">View Version on Civitai</a>'
+    civitai_links_html = " ".join([link for link in [model_link, version_link] if link])
+
+    model_metadata_html = ""
+    if model_data:
+        model_metadata_html = f"""
+        <h3 class="section-title">Raw Model Metadata</h3>
+        <pre class="raw-metadata">{json.dumps(model_data, indent=2)}</pre>
+        """
 
     html_content = f"""
 <!DOCTYPE html>
@@ -293,13 +412,12 @@ def generate_html_report(model_info, output_dir):
                     Likes
                 </div>
                 <div class="stat-item">
-                    <strong>{rating:.2f} ({rating_count})</strong>
+                    <strong>{rating_label} ({rating_count})</strong>
                     Rating
                 </div>
             </div>
             <div class="civitai-links">
-                <a href="https://civitai.com/models/{model_info['modelId']}" target="_blank">View Model on Civitai</a>
-                <a href="https://civitai.com/models/{model_info['modelId']}?modelVersionId={model_info['id']}" target="_blank">View Version on Civitai</a>
+                {civitai_links_html}
             </div>
         </header>
 
@@ -315,38 +433,46 @@ def generate_html_report(model_info, output_dir):
                 <strong>Usage Tips:</strong> {usage_tips}
             </div>
             <div class="detail-item">
-                <strong>Model ID:</strong> {model_info['modelId']}
+                <strong>Creator:</strong> {creator}
             </div>
             <div class="detail-item">
-                <strong>Version ID:</strong> {model_info['id']}
+                <strong>NSFW:</strong> {nsfw_label}
+            </div>
+            <div class="detail-item">
+                <strong>POI:</strong> {poi_label}
+            </div>
+            <div class="detail-item">
+                <strong>Allow No Credit:</strong> {allow_no_credit_label}
+            </div>
+            <div class="detail-item">
+                <strong>Versions:</strong> {version_count_label}
+            </div>
+            <div class="detail-item">
+                <strong>Model ID:</strong> {model_id_label}
+            </div>
+            <div class="detail-item">
+                <strong>Version ID:</strong> {version_id_label}
             </div>
         </div>
 
         <h3 class="section-title">Description</h3>
         <pre>{html.escape(description) if description else 'No description provided.'}</pre>
 
+        <h3 class="section-title">Tags</h3>
+        <div class="tags-container">
+            {tags_html}
+        </div>
+
         <h3 class="section-title">Trigger Words</h3>
         <div class="trigger-words">
             <ul>
-                {"".join([f"<li>{word.strip()}</li>" for word in trained_words]) if trained_words else "<li>No trigger words specified.</li>"}
+                {trigger_words_html}
             </ul>
         </div>
 
         <h3 class="section-title">Model Files</h3>
         <div class="model-files">
-            {"".join([f'''
-            <div class="model-file">
-                <p><strong>Name:</strong> {file['name']}</p>
-                <p><strong>Type:</strong> {file['type']}</p>
-                <p><strong>Size:</strong> {file['sizeKB'] / 1024:.2f} MB</p>
-                <p><strong>Primary:</strong> {'Yes' if file.get('primary') else 'No'}</p>
-                <p><strong>Scanned:</strong> {file.get('scannedAt', 'N/A').split('T')[0]}</p>
-                <p><strong>Pickle Scan:</strong> {file.get('pickleScanResult', 'N/A')}</p>
-                <p><strong>Virus Scan:</strong> {file.get('virusScanResult', 'N/A')}</p>
-                <p><strong>SHA256:</strong> {file['hashes'].get('SHA256', 'N/A')}</p>
-                <p><a href="{file['downloadUrl']}" target="_blank">Download</a></p>
-            </div>
-            ''' for file in model_info.get('files', [])]) if model_info.get('files') else '<p>No model files available.</p>'}
+            {model_files_html}
         </div>
 
         <h3 class="section-title">Images & Videos</h3>
@@ -396,8 +522,9 @@ def generate_html_report(model_info, output_dir):
     html_content += f"""
         </div>
 
-        <h3 class="section-title">Raw Metadata</h3>
+        <h3 class="section-title">Raw Version Metadata</h3>
         <pre class="raw-metadata">{json.dumps(model_info, indent=2)}</pre>
+        {model_metadata_html}
     </div>
 
     <!-- The Modal -->

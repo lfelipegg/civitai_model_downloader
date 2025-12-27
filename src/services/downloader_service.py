@@ -17,7 +17,17 @@ class DownloaderService:
     def get_model_info(self, url: str, api_key: str):
         return get_model_info_from_url(url, api_key)
 
-    def download_model(self, model_info, download_path, api_key, progress_callback=None, stop_event=None, pause_event=None):
+    def download_model(
+        self,
+        model_info,
+        download_path,
+        api_key,
+        progress_callback=None,
+        stop_event=None,
+        pause_event=None,
+        bandwidth_limit=None,
+        event_callback=None,
+    ):
         return download_civitai_model(
             model_info,
             download_path,
@@ -25,6 +35,8 @@ class DownloaderService:
             progress_callback=progress_callback,
             stop_event=stop_event,
             pause_event=pause_event,
+            bandwidth_limit=bandwidth_limit,
+            event_callback=event_callback,
         )
 
     def is_model_downloaded(self, model_info, download_path: str) -> bool:

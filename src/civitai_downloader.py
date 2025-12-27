@@ -427,7 +427,7 @@ def get_model_info_from_url(url, api_key):
         return None, f"No model versions found for model ID: {model_id}"
     return None, "Invalid Civitai URL provided."
 
-def download_file(url, path, api_key=None, progress_callback=None, expected_sha256=None, stop_event=None, pause_event=None):
+def download_file(url, path, api_key=None, progress_callback=None, expected_sha256=None, stop_event=None, pause_event=None, bandwidth_limit=None):
     """Downloads a file from a URL to a specified path with progress updates and SHA256 verification."""
     print(f"Downloading {url} to {path}")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
@@ -455,7 +455,16 @@ def download_file(url, path, api_key=None, progress_callback=None, expected_sha2
         if e.response.status_code == 416: # Range Not Satisfiable
             print(f"Server does not support range requests or range is invalid. Restarting download for {os.path.basename(path)}.")
             os.remove(path) # Delete incomplete file
-            return download_file(url, path, api_key, progress_callback, expected_sha256) # Restart without range header
+            return download_file(
+                url,
+                path,
+                api_key,
+                progress_callback,
+                expected_sha256,
+                stop_event=stop_event,
+                pause_event=pause_event,
+                bandwidth_limit=bandwidth_limit
+            ) # Restart without range header
         return f"HTTP Error during download: {e.response.status_code} - {e.response.reason}"
     except requests.exceptions.RequestException as e:
         return f"Network Error during download: {e}"
@@ -476,6 +485,9 @@ def download_file(url, path, api_key=None, progress_callback=None, expected_sha2
             for chunk in iter(lambda: f_existing.read(8192), b''):
                 sha256_hash.update(chunk)
 
+    limit_window_start = time.time()
+    bytes_since_limit = 0
+
     with open(path, file_mode) as f:
         for chunk in response.iter_content(chunk_size=32768):  # Increased chunk size for better performance
             if stop_event and stop_event.is_set():
@@ -490,6 +502,17 @@ def download_file(url, path, api_key=None, progress_callback=None, expected_sha2
             f.write(chunk)
             sha256_hash.update(chunk)
             bytes_downloaded += len(chunk)
+
+            if bandwidth_limit and bandwidth_limit > 0:
+                bytes_since_limit += len(chunk)
+                elapsed_limit = time.time() - limit_window_start
+                if elapsed_limit > 0:
+                    expected_time = bytes_since_limit / bandwidth_limit
+                    if expected_time > elapsed_limit:
+                        time.sleep(expected_time - elapsed_limit)
+                if elapsed_limit > 1.0:
+                    limit_window_start = time.time()
+                    bytes_since_limit = 0
             
             # Throttle progress updates to prevent UI flooding (max 10 updates per second)
             current_time = time.time()
@@ -598,11 +621,28 @@ def check_disk_space(path, required_bytes):
     except Exception as e:
         return f"Error checking disk space: {e}"
 
-def download_civitai_model(model_info, download_base_path, api_key, progress_callback=None, stop_event=None, pause_event=None):
+def download_civitai_model(
+    model_info,
+    download_base_path,
+    api_key,
+    progress_callback=None,
+    stop_event=None,
+    pause_event=None,
+    bandwidth_limit=None,
+    event_callback=None,
+):
     """
     Downloads a Civitai model, its images, description assets, and saves metadata.
     Creates the directory structure: ./{{base_model}}/{{type}}/{{Model_name}}/{{Model_version}}/
     """
+    def emit_event(event, phase, **payload):
+        if not event_callback:
+            return
+        try:
+            event_callback(event, phase, payload)
+        except Exception as exc:
+            print(f"Warning: Event callback failed for {phase}: {exc}")
+
     model_name = model_info['model']['name']
     model_version_name = model_info['name']
     base_model = model_info['baseModel']
@@ -642,22 +682,51 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
         if disk_space_error:
             return disk_space_error, None
 
-        download_error = download_file(model_download_url, os.path.join(target_dir, model_filename), api_key, progress_callback=progress_callback, expected_sha256=expected_sha256, stop_event=stop_event, pause_event=pause_event)
+        emit_event("start", "model_download", filename=model_filename, size_bytes=required_bytes)
+        model_download_start = time.monotonic()
+        download_error = download_file(
+            model_download_url,
+            os.path.join(target_dir, model_filename),
+            api_key,
+            progress_callback=progress_callback,
+            expected_sha256=expected_sha256,
+            stop_event=stop_event,
+            pause_event=pause_event,
+            bandwidth_limit=bandwidth_limit
+        )
+        model_download_elapsed = time.monotonic() - model_download_start
+        emit_event("end", "model_download", duration=model_download_elapsed, error=download_error)
         if download_error:
             return f"Failed to download model file: {download_error}", None
     else:
         return f"No main model file found for {model_name} v{model_version_name}", None
+
+    assets_total = 0
+    assets_downloaded = 0
+    emit_event("start", "asset_download")
+    assets_start = time.monotonic()
 
     # Download images
     if 'images' in model_info:
         for i, image in enumerate(model_info['images']):
             image_url = image['url']
             image_name = f"image_{i}{os.path.splitext(image_url)[1]}" # Get extension from URL
+            assets_total += 1
             # For images, we can pass a specific callback or use the general one.
             # Let's use the general one for now, as GUI can differentiate based on context if needed.
-            download_error = download_file(image_url, os.path.join(target_dir, image_name), api_key, progress_callback=progress_callback, stop_event=stop_event, pause_event=pause_event)
+            download_error = download_file(
+                image_url,
+                os.path.join(target_dir, image_name),
+                api_key,
+                progress_callback=progress_callback,
+                stop_event=stop_event,
+                pause_event=pause_event,
+                bandwidth_limit=bandwidth_limit
+            )
             if download_error:
                 print(f"Warning: Failed to download image {image_name}: {download_error}")
+            else:
+                assets_downloaded += 1
 
     # Ensure description text is present before saving metadata
     description_text = ensure_model_description(model_info, api_key=api_key)
@@ -666,13 +735,26 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
     save_metadata(model_info, os.path.join(target_dir, "metadata.json"))
 
     # Persist description text and any embedded media from the post
-    save_description_and_assets(
+    description_assets = save_description_and_assets(
         model_info,
         target_dir,
         description_text=description_text,
         api_key=api_key,
         stop_event=stop_event,
-        pause_event=pause_event
+        pause_event=pause_event,
+        bandwidth_limit=bandwidth_limit
+    )
+    if description_assets:
+        assets_total += description_assets.get("assets_total", 0)
+        assets_downloaded += description_assets.get("assets_downloaded", 0)
+
+    assets_elapsed = time.monotonic() - assets_start
+    emit_event(
+        "end",
+        "asset_download",
+        duration=assets_elapsed,
+        assets_total=assets_total,
+        assets_downloaded=assets_downloaded,
     )
 
     # Generate HTML report and add to history in background to avoid UI blocking
@@ -681,10 +763,28 @@ def download_civitai_model(model_info, download_base_path, api_key, progress_cal
         try:
             # Generate HTML report
             from src.html_generator import generate_html_report
-            generate_html_report(model_info, target_dir)
+            emit_event("start", "html_report")
+            report_start = time.monotonic()
+            model_data = None
+            model_id = (
+                model_info.get('modelId')
+                or model_info.get('model', {}).get('id')
+            )
+            if model_id:
+                model_data, error = get_model_with_versions(model_id, api_key)
+                if error:
+                    print(f"Warning: Failed to fetch model info for report: {error}")
+            generate_html_report(model_info, target_dir, model_data=model_data)
             print(f"HTML report generated for {model_name} v{model_version_name}")
+            report_elapsed = time.monotonic() - report_start
+            emit_event("end", "html_report", duration=report_elapsed)
         except Exception as e:
             print(f"Warning: Failed to generate HTML report: {e}")
+            try:
+                report_elapsed = time.monotonic() - report_start
+            except Exception:
+                report_elapsed = 0.0
+            emit_event("end", "html_report", duration=report_elapsed, error=str(e))
 
     # Run background tasks in separate thread to avoid blocking
     bg_thread = threading.Thread(target=background_tasks, daemon=True, name=f"bg_{model_name}_{model_version_name}")
@@ -774,11 +874,22 @@ def fetch_model_description(model_info, api_key=None):
 
     return None
 
-def save_description_and_assets(model_info, target_dir, description_text=None, api_key=None, stop_event=None, pause_event=None):
+def save_description_and_assets(
+    model_info,
+    target_dir,
+    description_text=None,
+    api_key=None,
+    stop_event=None,
+    pause_event=None,
+    bandwidth_limit=None,
+):
     """
     Persists the model description text and downloads any media referenced inside it.
     The description text is saved as Markdown to preserve formatting.
+    Returns a dict with asset download counts.
     """
+    result = {"assets_total": 0, "assets_downloaded": 0}
+
     description = (
         description_text
         or model_info.get('description')
@@ -791,7 +902,7 @@ def save_description_and_assets(model_info, target_dir, description_text=None, a
             model_info['description'] = description
 
     if not description:
-        return
+        return result
 
     description_path = os.path.join(target_dir, "description.md")
     try:
@@ -803,7 +914,7 @@ def save_description_and_assets(model_info, target_dir, description_text=None, a
 
     media_urls = DESCRIPTION_MEDIA_PATTERN.findall(description)
     if not media_urls:
-        return
+        return result
 
     assets_dir = os.path.join(target_dir, "description_images")
     os.makedirs(assets_dir, exist_ok=True)
@@ -837,13 +948,19 @@ def save_description_and_assets(model_info, target_dir, description_text=None, a
                 filename = f"{filename}{ext}"
 
         destination_path = os.path.join(assets_dir, filename)
+        result["assets_total"] += 1
         download_error = download_file(
             url,
             destination_path,
             api_key,
             progress_callback=None,
             stop_event=stop_event,
-            pause_event=pause_event
+            pause_event=pause_event,
+            bandwidth_limit=bandwidth_limit
         )
         if download_error:
             print(f"Warning: Failed to download description media from {url}: {download_error}")
+        else:
+            result["assets_downloaded"] += 1
+
+    return result

@@ -188,6 +188,5 @@ pyvenv.cfg
 pip-selfcheck.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python,venv,dotenv
-
-thumbnails/
-./thumbnails/
+/thumbnails/
+streamlit_download_state.json
